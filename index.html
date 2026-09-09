@@ -391,12 +391,6 @@
     #printArea h1{font-size:18px;margin-bottom:12px;}
   }
 </style>
-<link rel="manifest" href="manifest.webmanifest">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="House Log">
-<meta name="theme-color" content="#F6F4EE">
-<link rel="apple-touch-icon" href="icon-192.png">
 </head>
 <body>
 <div class="app">
@@ -590,13 +584,46 @@ function checklistSummary(r){
   return `${checked}/${items.length}`;
 }
 
+function extractBuildingName(address){
+  if(!address) return '';
+  let s = String(address).trim();
+
+  // Australian/NZ style "unit/street-number" — keep the street number, drop the unit prefix
+  s = s.replace(/\b(unit|apt\.?|apartment)\s*(?=\d+\s*\/\s*\d+)/gi, '');
+  s = s.replace(/(\d+)\s*\/\s*(\d+)/g, '$2');
+
+  // strip unit / floor / room / building-number tokens anywhere in the string
+  const stripPatterns = [
+    /\d+\s*号楼/g, /\d+\s*幢/g, /\d+\s*栋/g, /\d+\s*单元/g, /\d+\s*室/g, /\d+\s*层/g, /\d+\s*弄/g,
+    /room\s*#?\d+/gi, /unit\s*#?\d+/gi, /apt\.?\s*#?\d+/gi, /apartment\s*#?\d+/gi,
+    /floor\s*\d+/gi, /\bfl\.?\s*\d+/gi, /no\.?\s*\d+/gi, /#\s*\d+/g,
+    /building\s*#?\d+/gi, /\bbldg\.?\s*#?\d+/gi
+  ];
+  stripPatterns.forEach(p=>{ s = s.replace(p, ' '); });
+
+  // split remaining text into segments
+  let tokens = s.split(/[,，、]/).map(t=>t.trim()).filter(Boolean);
+  tokens = tokens.filter(t=> !/^[\d\-\/\s]+$/.test(t));
+  if(tokens.length===0) return '';
+
+  // prefer a token that contains a recognizable community/building suffix
+  const suffixes = ['小区','花园','苑','公寓','大厦','广场','城','庄园','府','公馆','名邸','新村','里','坊','庭','轩','阁','湾','郡',
+    'court','residence','residences','tower','towers','gardens','plaza','heights','park','villas','apartments','estate','manor'];
+  let withSuffix = tokens.find(t=> suffixes.some(suf=> t.toLowerCase().includes(suf.toLowerCase())));
+  if(withSuffix) return withSuffix.trim();
+
+  // otherwise fall back to the longest remaining token (usually the descriptive name)
+  tokens.sort((a,b)=> b.length - a.length);
+  return tokens[0].trim();
+}
+
 function getFilteredSorted(){
   let out = records.filter(r=>{
     if(filterMode==='favorite' && !r.favorite) return false;
     if(filterMode==='issues' && r.qualityIssues!=='yes') return false;
     if(searchQuery){
       const q = searchQuery.toLowerCase();
-      const haystack = [r.address, r.notes, r.pros, r.cons, r.qualityNotes, r.strataFee].join(' ').toLowerCase();
+      const haystack = [r.address, r.buildingName, r.suburb, r.notes, r.pros, r.cons, r.viewingReview, r.qualityNotes, r.strataFee].join(' ').toLowerCase();
       if(!haystack.includes(q)) return false;
     }
     return true;
@@ -645,8 +672,8 @@ function render(){
     <div class="row" data-id="${r.id}">
       ${compareMode ? `<div class="row-check"><input type="checkbox" data-id="${r.id}" ${compareSelected.has(r.id)?'checked':''}></div>` : ''}
       <div class="row-main">
-        <p class="row-address">${r.favorite ? '<span class="fav-mark">♥</span>' : ''}${escapeHtml(r.address||'Unnamed property')}</p>
-        <div class="row-meta">${priceRangeText(r)}${pricePerSqmText(r) ? ' ('+pricePerSqmText(r)+')' : ''} · ${r.area?r.area+' sqm':'Area not set'} · ${roomSummary(r)}</div>
+        <p class="row-address">${r.favorite ? '<span class="fav-mark">♥</span>' : ''}${escapeHtml(r.buildingName || r.address || 'Unnamed property')}${r.suburb ? ' · '+escapeHtml(r.suburb) : ''}</p>
+        <div class="row-meta">${r.buildingName ? escapeHtml(r.address) + ' · ' : ''}${priceRangeText(r)}${pricePerSqmText(r) ? ' ('+pricePerSqmText(r)+')' : ''} · ${r.area?r.area+' sqm':'Area not set'} · ${roomSummary(r)}</div>
       </div>
       <div class="row-side">
         <div class="stars">${starString(r.rating)}</div>
@@ -721,7 +748,18 @@ function renderDetail(r){
   const sheet = document.getElementById('sheet');
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
-    <h2>${escapeHtml(r.address||'Unnamed property')}</h2>
+    <h2>${escapeHtml(r.buildingName || r.address || 'Unnamed property')}</h2>
+    ${r.buildingName ? `<div class="detail-block"><div class="detail-label">Full address</div><div class="detail-value">${escapeHtml(r.address)}</div></div>` : ''}
+    <div class="row3">
+      <div class="detail-block">
+        <div class="detail-label">Suburb</div>
+        <div class="detail-value">${escapeHtml(r.suburb)||'—'}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Year built</div>
+        <div class="detail-value">${r.yearBuilt||'—'}</div>
+      </div>
+    </div>
     <div class="detail-block">
       <div class="detail-label">Viewing date</div>
       <div class="detail-value">${fmtDate(r.date)}</div>
@@ -750,9 +788,25 @@ function renderDetail(r){
         <div class="detail-value">${r.studyRooms || '—'}</div>
       </div>
     </div>
-    <div class="detail-block">
-      <div class="detail-label">Strata fee</div>
-      <div class="detail-value">${r.strataFee ? r.strataFee : '—'}</div>
+    <div class="row3">
+      <div class="detail-block">
+        <div class="detail-label">Strata fee</div>
+        <div class="detail-value">${r.strataFee ? r.strataFee : '—'}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Rental estimate</div>
+        <div class="detail-value">${r.rentalEstimate ? '$'+r.rentalEstimate+'/wk' : '—'}</div>
+      </div>
+    </div>
+    <div class="row3">
+      <div class="detail-block">
+        <div class="detail-label">Council</div>
+        <div class="detail-value">${r.councilRate ? '$'+r.councilRate+'/qtr' : '—'}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Water</div>
+        <div class="detail-value">${r.waterRate ? '$'+r.waterRate+'/qtr' : '—'}</div>
+      </div>
     </div>
     <div class="detail-block">
       <div class="detail-label">Rating</div>
@@ -788,6 +842,10 @@ function renderDetail(r){
       <div class="detail-value tag-concern">${escapeHtml(r.cons)||'—'}</div>
     </div>
     <div class="detail-block">
+      <div class="detail-label">Overall review</div>
+      <div class="detail-value">${escapeHtml(r.viewingReview)||'—'}</div>
+    </div>
+    <div class="detail-block">
       <div class="detail-label">Notes</div>
       <div class="detail-value">${escapeHtml(r.notes)||'—'}</div>
     </div>
@@ -810,7 +868,7 @@ function renderDetail(r){
 }
 
 function openForm(existing){
-  const r = existing || {id:uid(), address:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', studyRooms:'', strataFee:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', priceHistory:[]};
+  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', priceHistory:[]};
   if(!r.scores) r.scores = {};
   if(!r.checklist) r.checklist = {};
   if(!r.priceHistory) r.priceHistory = [];
@@ -822,6 +880,23 @@ function openForm(existing){
     <div class="field">
       <label>Address / building name</label>
       <input type="text" id="f_address" value="${escapeHtml(r.address)}" placeholder="e.g. 502, Building 3, Osmanthus Court">
+    </div>
+    <div class="field">
+      <label>Building / community name</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="f_buildingName" value="${escapeHtml(r.buildingName||'')}" placeholder="Auto-detected from address" style="flex:1;">
+        <button type="button" class="icon-btn" id="reguessBtn" title="Re-detect from address" style="border:1px solid var(--line);border-radius:8px;">↻</button>
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Suburb</label>
+        <input type="text" id="f_suburb" value="${escapeHtml(r.suburb||'')}" placeholder="e.g. Bondi">
+      </div>
+      <div class="field">
+        <label>Year built</label>
+        <input type="number" id="f_yearBuilt" value="${r.yearBuilt||''}" placeholder="1998">
+      </div>
     </div>
     <div class="field">
       <label>Viewing date</label>
@@ -855,6 +930,21 @@ function openForm(existing){
       <div class="field">
         <label>Study rooms</label>
         <input type="number" min="0" id="f_studyRooms" value="${r.studyRooms||''}" placeholder="1">
+      </div>
+    </div>
+    <div class="subheading">Running costs</div>
+    <div class="field">
+      <label>Rental estimate ($/wk)</label>
+      <input type="number" id="f_rentalEstimate" value="${r.rentalEstimate||''}" placeholder="650">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Council ($/qtr)</label>
+        <input type="number" id="f_councilRate" value="${r.councilRate||''}" placeholder="450">
+      </div>
+      <div class="field">
+        <label>Water ($/qtr)</label>
+        <input type="number" id="f_waterRate" value="${r.waterRate||''}" placeholder="180">
       </div>
     </div>
     <div class="field">
@@ -905,6 +995,10 @@ function openForm(existing){
       <textarea id="f_cons" placeholder="Noisy, low floor…">${escapeHtml(r.cons)}</textarea>
     </div>
     <div class="field">
+      <label>Overall review (after viewing)</label>
+      <textarea id="f_viewingReview" placeholder="Your overall verdict after visiting…">${escapeHtml(r.viewingReview)}</textarea>
+    </div>
+    <div class="field">
       <label>Other notes</label>
       <textarea id="f_notes" placeholder="Agent contact, negotiation room, etc.">${escapeHtml(r.notes)}</textarea>
     </div>
@@ -921,6 +1015,15 @@ function openForm(existing){
       rating = parseInt(s.dataset.n);
       sheet.querySelectorAll('#starPicker span').forEach(x=> x.classList.toggle('on', parseInt(x.dataset.n)<=rating));
     });
+  });
+  sheet.querySelector('#f_address').addEventListener('input', ()=>{
+    const bField = sheet.querySelector('#f_buildingName');
+    if(!bField.value.trim()){
+      bField.value = extractBuildingName(sheet.querySelector('#f_address').value);
+    }
+  });
+  sheet.querySelector('#reguessBtn').addEventListener('click', ()=>{
+    sheet.querySelector('#f_buildingName').value = extractBuildingName(sheet.querySelector('#f_address').value);
   });
   sheet.querySelector('#cancelBtn').addEventListener('click', closeOverlay);
   sheet.querySelector('#saveBtn').addEventListener('click', async ()=>{
@@ -942,11 +1045,17 @@ function openForm(existing){
     const updated = {
       id:r.id,
       address: sheet.querySelector('#f_address').value.trim(),
+      buildingName: sheet.querySelector('#f_buildingName').value.trim(),
+      suburb: sheet.querySelector('#f_suburb').value.trim(),
+      yearBuilt: sheet.querySelector('#f_yearBuilt').value,
       date: sheet.querySelector('#f_date').value,
       priceMin: newPriceMin,
       priceMax: newPriceMax,
       area: sheet.querySelector('#f_area').value,
       strataFee: sheet.querySelector('#f_strataFee').value.trim(),
+      rentalEstimate: sheet.querySelector('#f_rentalEstimate').value,
+      councilRate: sheet.querySelector('#f_councilRate').value,
+      waterRate: sheet.querySelector('#f_waterRate').value,
       bedrooms: sheet.querySelector('#f_bedrooms').value,
       studyRooms: sheet.querySelector('#f_studyRooms').value,
       commuteMinutes: sheet.querySelector('#f_commute').value,
@@ -958,6 +1067,7 @@ function openForm(existing){
       priceHistory,
       pros: sheet.querySelector('#f_pros').value.trim(),
       cons: sheet.querySelector('#f_cons').value.trim(),
+      viewingReview: sheet.querySelector('#f_viewingReview').value.trim(),
       notes: sheet.querySelector('#f_notes').value.trim(),
       favorite: sheet.querySelector('#f_fav').checked
     };
@@ -1010,16 +1120,23 @@ function openCompare(){
   const items = records.filter(r=> compareSelected.has(r.id));
   if(items.length<2) return;
   const rowsDef = [
+    {label:'Building', fn: r=> escapeHtml(r.buildingName)||'—'},
+    {label:'Suburb', fn: r=> escapeHtml(r.suburb)||'—'},
+    {label:'Year built', fn: r=> r.yearBuilt||'—'},
     {label:'Price', fn: r=> priceRangeText(r)},
     {label:'Price/sqm', fn: r=> pricePerSqmText(r) || '—'},
     {label:'Area', fn: r=> r.area ? r.area+' sqm' : '—'},
     {label:'Bedrooms', fn: r=> r.bedrooms || '—'},
     {label:'Study rooms', fn: r=> r.studyRooms || '—'},
     {label:'Strata fee', fn: r=> r.strataFee || '—'},
+    {label:'Rental estimate', fn: r=> r.rentalEstimate ? '$'+r.rentalEstimate+'/wk' : '—'},
+    {label:'Council', fn: r=> r.councilRate ? '$'+r.councilRate+'/qtr' : '—'},
+    {label:'Water', fn: r=> r.waterRate ? '$'+r.waterRate+'/qtr' : '—'},
     {label:'Rating', fn: r=> starString(r.rating)},
     {label:'Quality issues', fn: r=> r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No' : 'Not noted')},
     {label:'Pros', fn: r=> escapeHtml(r.pros)||'—'},
     {label:'Cons', fn: r=> escapeHtml(r.cons)||'—'},
+    {label:'Overall review', fn: r=> escapeHtml(r.viewingReview)||'—'},
     {label:'Viewing date', fn: r=> fmtDate(r.date)}
   ];
   const sheet = document.getElementById('sheet');
@@ -1119,6 +1236,9 @@ document.getElementById('settingsBtn').addEventListener('click', openSettings);
 function buildExportRows(){
   return getFilteredSorted().map(r=>({
     'Address': r.address,
+    'Building': r.buildingName,
+    'Suburb': r.suburb,
+    'Year Built': r.yearBuilt,
     'Date': r.date,
     'Price Min': r.priceMin,
     'Price Max': r.priceMax,
@@ -1127,6 +1247,9 @@ function buildExportRows(){
     'Bedrooms': r.bedrooms,
     'Study Rooms': r.studyRooms,
     'Strata Fee': r.strataFee,
+    'Rental Estimate ($/wk)': r.rentalEstimate,
+    'Council ($/qtr)': r.councilRate,
+    'Water ($/qtr)': r.waterRate,
     'Commute (min)': r.commuteMinutes,
     'Quality Issues': r.qualityIssues==='yes'?'Yes':(r.qualityIssues==='no'?'No':''),
     'Quality Notes': r.qualityNotes,
@@ -1135,6 +1258,7 @@ function buildExportRows(){
     'Checklist': checklistSummary(r) || '',
     'Pros': r.pros,
     'Cons': r.cons,
+    'Overall Review': r.viewingReview,
     'Notes': r.notes,
     'Favorite': r.favorite ? 'Yes' : 'No'
   }));
@@ -1171,6 +1295,9 @@ document.getElementById('exportPdfBtn').addEventListener('click', exportToPdf);
 
 const FIELD_ALIASES = {
   address: ['address','property','propertyaddress','name','building','apartment','unit'],
+  buildingName: ['buildingname','building','community','complex','communityname','propertyname','estate'],
+  suburb: ['suburb','district','area2','neighbourhood','neighborhood'],
+  yearBuilt: ['yearbuilt','builtyear','constructionyear','year'],
   date: ['date','viewingdate','visitdate'],
   priceMin: ['pricemin','minprice','pricelow','pricefrom'],
   priceMax: ['pricemax','maxprice','pricehigh','priceto'],
@@ -1179,12 +1306,16 @@ const FIELD_ALIASES = {
   bedrooms: ['bedrooms','beds','bedroom','br'],
   studyRooms: ['studyrooms','study','den','studyroom'],
   strataFee: ['stratafee','strata','hoa','maintenancefee','managementfee'],
+  rentalEstimate: ['rentalestimatewk','rentalestimate','rent','weeklyrent','rentwk','rentperweek'],
+  councilRate: ['councilqtr','council','councilrate','councilrates'],
+  waterRate: ['waterqtr','water','waterrate','waterrates'],
   commuteMinutes: ['commute','commutetime','commuteminutes','commutemins'],
   qualityIssues: ['qualityissues','qualityissue','issues'],
   qualityNotes: ['qualitynotes','issuedetails','defects','qualitydetails'],
   rating: ['rating','stars','score'],
   pros: ['pros','pro','positives'],
   cons: ['cons','con','negatives','concerns'],
+  viewingReview: ['overallreview','viewingreview','review','verdict','postviewingreview'],
   notes: ['notes','note','comments','remarks'],
   favorite: ['favorite','favourite','liked','starred']
 };
@@ -1211,6 +1342,8 @@ function rowToRecord(row){
   }
 
   const address = String(pick('address') || '').trim();
+  let buildingName = String(pick('buildingName') || '').trim();
+  if(!buildingName && address) buildingName = extractBuildingName(address);
 
   let dateVal = pick('date');
   let dateStr = '';
@@ -1243,6 +1376,9 @@ function rowToRecord(row){
   return {
     id: uid(),
     address,
+    buildingName,
+    suburb: pick('suburb') !== '' ? String(pick('suburb')) : '',
+    yearBuilt: pick('yearBuilt') !== '' ? String(pick('yearBuilt')) : '',
     date: dateStr,
     priceMin: priceMin !== '' ? String(priceMin) : '',
     priceMax: priceMax !== '' ? String(priceMax) : '',
@@ -1250,12 +1386,16 @@ function rowToRecord(row){
     bedrooms: pick('bedrooms') !== '' ? String(pick('bedrooms')) : '',
     studyRooms: pick('studyRooms') !== '' ? String(pick('studyRooms')) : '',
     strataFee: pick('strataFee') !== '' ? String(pick('strataFee')) : '',
+    rentalEstimate: pick('rentalEstimate') !== '' ? String(pick('rentalEstimate')) : '',
+    councilRate: pick('councilRate') !== '' ? String(pick('councilRate')) : '',
+    waterRate: pick('waterRate') !== '' ? String(pick('waterRate')) : '',
     commuteMinutes: pick('commuteMinutes') !== '' ? String(pick('commuteMinutes')) : '',
     qualityIssues,
     qualityNotes: pick('qualityNotes') !== '' ? String(pick('qualityNotes')) : '',
     rating,
     pros: pick('pros') !== '' ? String(pick('pros')) : '',
     cons: pick('cons') !== '' ? String(pick('cons')) : '',
+    viewingReview: pick('viewingReview') !== '' ? String(pick('viewingReview')) : '',
     notes: pick('notes') !== '' ? String(pick('notes')) : '',
     favorite,
     scores: {},
@@ -1296,8 +1436,8 @@ async function handleImportFile(e){
 }
 
 function downloadTemplate(){
-  const headers = ['Address','Date','Price Min','Price Max','Area','Bedrooms','Study Rooms','Strata Fee','Commute (min)','Quality Issues','Quality Notes','Rating','Pros','Cons','Notes','Favorite'];
-  const example = ['123 Example St, Unit 5','2026-03-15','260','300','88','2','1','350/month','25','No','','4','Good light, near subway','Street noise','Agent: Jane 555-1234','No'];
+  const headers = ['Address','Building','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
+  const example = ['303/71 Ridge Street','71 Ridge Street','North Sydney','1998','2026-03-15','260','300','88','2','1','350/month','650','450','180','25','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = headers.map(esc).join(',') + '\n' + example.map(esc).join(',');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
@@ -1316,11 +1456,6 @@ document.getElementById('importInput').addEventListener('change', handleImportFi
 document.getElementById('templateBtn').addEventListener('click', downloadTemplate);
 
 load();
-
-// PWA: register the service worker when served from a web origin (HTTPS/localhost).
-if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
-}
 </script>
 </body>
 </html>
