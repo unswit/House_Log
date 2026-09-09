@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>House Viewing Log</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="House Log">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#F6F4EE">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --paper:#F6F4EE;
+    --paper-raised:#FBFAF5;
+    --ink:#24303A;
+    --ink-soft:#6B7680;
+    --line:#DCD7C9;
+    --accent:#3B6E71;
+    --accent-dim:#EBF1F0;
+    --warm:#B8874A;
+    --good:#52734F;
+    --concern:#9C4A3C;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans',-apple-system,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{
+    max-width:480px;
+    margin:0 auto;
+    min-height:100vh;
+    position:relative;
+    padding-bottom:100px;
+  }
+  header{
+    padding:28px 20px 16px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    align-items:baseline;
+  }
+  header h1{
+    font-family:'Fraunces',serif;
+    font-weight:600;
+    font-size:24px;
+    margin:0;
+    letter-spacing:-0.01em;
+  }
+  header .count{
+    font-size:13px;
+    color:var(--ink-soft);
+    white-space:nowrap;
+  }
+  .toolbar{
+    padding:12px 20px 0;
+    display:flex;
+    gap:14px;
+    flex-wrap:wrap;
+    row-gap:6px;
+  }
+  .tool-btn{
+    background:none;
+    border:none;
+    padding:0;
+    color:var(--accent);
+    font-family:inherit;
+    font-size:12.5px;
+    cursor:pointer;
+    text-decoration:underline;
+    text-underline-offset:2px;
+  }
+  .tool-btn:active{opacity:0.6;}
+  .searchbar{
+    padding:12px 20px 0;
+    display:flex;
+    gap:8px;
+  }
+  .searchbar input[type=text]{
+    flex:1;
+    padding:9px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font-family:inherit;
+    font-size:14px;
+    color:var(--ink);
+  }
+  .searchbar select{
+    padding:9px 8px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font-family:inherit;
+    font-size:12.5px;
+    color:var(--ink);
+    max-width:130px;
+  }
+  .chipbar{
+    padding:10px 20px 0;
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+  .chip{
+    padding:6px 12px;
+    border-radius:999px;
+    border:1px solid var(--line);
+    background:#fff;
+    color:var(--ink-soft);
+    font-family:inherit;
+    font-size:12.5px;
+    cursor:pointer;
+  }
+  .chip.active{
+    background:var(--ink);
+    border-color:var(--ink);
+    color:var(--paper);
+  }
+  .chip:active{opacity:0.7;}
+  .row-check{
+    padding-right:12px;
+    padding-top:3px;
+    flex-shrink:0;
+  }
+  .row-check input{width:18px;height:18px;}
+  .compare-fab{
+    position:fixed;
+    bottom:28px;
+    left:calc(50% - 240px + 20px);
+    right:auto;
+    padding:0 20px;
+    height:48px;
+    border-radius:24px;
+    background:var(--accent);
+    color:#fff;
+    border:none;
+    font-size:14px;
+    font-weight:600;
+    font-family:inherit;
+    box-shadow:0 6px 16px rgba(36,48,58,0.28);
+    cursor:pointer;
+    display:none;
+  }
+  .compare-fab.show{display:block;}
+  @media (max-width:520px){
+    .compare-fab{left:20px;}
+  }
+  .compare-scroll{overflow-x:auto;margin:0 -20px;padding:0 20px;}
+  .compare-table{border-collapse:collapse;width:100%;min-width:480px;}
+  .compare-table th, .compare-table td{
+    border-bottom:1px solid var(--line);
+    padding:9px 10px;
+    font-size:13px;
+    text-align:left;
+    vertical-align:top;
+    min-width:130px;
+  }
+  .compare-table th{
+    font-family:'Fraunces',serif;
+    font-size:14px;
+    font-weight:600;
+    position:sticky;
+    top:0;
+    background:var(--paper-raised);
+  }
+  .compare-table td:first-child, .compare-table th:first-child{
+    position:sticky;
+    left:0;
+    background:var(--paper-raised);
+    color:var(--ink-soft);
+    font-size:12px;
+    min-width:96px;
+    z-index:1;
+  }
+  #list{padding:4px 20px 0;}
+  .row{
+    padding:16px 0;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    cursor:pointer;
+  }
+  .row:active{opacity:0.6;}
+  .row-main{flex:1;min-width:0;}
+  .row-address{
+    font-family:'Fraunces',serif;
+    font-size:18px;
+    font-weight:600;
+    margin:0 0 4px;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .row-meta{
+    font-size:13px;
+    color:var(--ink-soft);
+  }
+  .row-side{
+    text-align:right;
+    padding-left:12px;
+    flex-shrink:0;
+  }
+  .stars{font-size:13px;color:var(--warm);letter-spacing:1px;}
+  .row-date{font-size:12px;color:var(--ink-soft);margin-top:6px;}
+  .fav-mark{color:var(--concern);font-size:15px;margin-right:4px;}
+
+  .empty{
+    padding:80px 32px 0;
+    text-align:center;
+    color:var(--ink-soft);
+  }
+  .empty p{font-size:14px;line-height:1.7;margin:0;}
+  .empty .big{
+    font-family:'Fraunces',serif;
+    font-size:19px;
+    color:var(--ink);
+    margin-bottom:10px;
+    font-weight:600;
+  }
+
+  .fab{
+    position:fixed;
+    bottom:28px;
+    right:calc(50% - 240px + 20px);
+    width:56px;height:56px;
+    border-radius:50%;
+    background:var(--ink);
+    color:var(--paper);
+    border:none;
+    font-size:26px;
+    line-height:56px;
+    text-align:center;
+    box-shadow:0 6px 16px rgba(36,48,58,0.28);
+    cursor:pointer;
+  }
+  @media (max-width:520px){
+    .fab{right:20px;}
+  }
+  .fab:active{transform:scale(0.94);}
+
+  .sheet-overlay{
+    position:fixed;inset:0;
+    background:rgba(36,48,58,0.35);
+    display:none;
+    z-index:10;
+  }
+  .sheet-overlay.open{display:block;}
+  .sheet{
+    position:fixed;
+    left:0;right:0;bottom:0;
+    max-width:480px;
+    margin:0 auto;
+    background:var(--paper-raised);
+    border-radius:18px 18px 0 0;
+    max-height:92vh;
+    overflow-y:auto;
+    padding:20px 20px 32px;
+    transform:translateY(100%);
+    transition:transform 0.28s ease;
+    z-index:11;
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{
+    width:36px;height:4px;background:var(--line);
+    border-radius:2px;margin:0 auto 18px;
+  }
+  .sheet h2{
+    font-family:'Fraunces',serif;
+    font-size:21px;
+    margin:0 0 18px;
+    font-weight:700;
+  }
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block;
+    font-size:12px;
+    color:var(--ink-soft);
+    margin-bottom:5px;
+  }
+  .field input, .field textarea{
+    width:100%;
+    padding:10px 12px;
+    border:1px solid var(--line);
+    border-radius:8px;
+    background:#fff;
+    font-family:inherit;
+    font-size:15px;
+    color:var(--ink);
+  }
+  .field textarea{resize:vertical;min-height:52px;}
+  .row2{display:flex;gap:10px;}
+  .row2 .field{flex:1;}
+  .row3{display:flex;gap:10px;}
+  .row3 .field{flex:1;}
+  .star-picker{display:flex;gap:8px;font-size:26px;color:var(--line);}
+  .star-picker span{cursor:pointer;}
+  .star-picker span.on{color:var(--warm);}
+  .btn-row{display:flex;gap:10px;margin-top:20px;}
+  .btn{
+    flex:1;
+    padding:13px;
+    border-radius:9px;
+    border:none;
+    font-size:15px;
+    font-weight:600;
+    cursor:pointer;
+    font-family:inherit;
+  }
+  .btn-primary{background:var(--ink);color:var(--paper);}
+  .btn-secondary{background:transparent;color:var(--ink-soft);border:1px solid var(--line);}
+  .btn-danger{background:transparent;color:var(--concern);border:1px solid var(--concern);}
+  .btn:active{opacity:0.7;}
+
+  .detail-block{margin-bottom:16px;}
+  .detail-label{font-size:12px;color:var(--ink-soft);margin-bottom:3px;}
+  .detail-value{font-size:15px;line-height:1.6;white-space:pre-wrap;}
+  .tag-good{color:var(--good);}
+  .tag-concern{color:var(--concern);}
+  .loading{padding:60px 20px;text-align:center;color:var(--ink-soft);font-size:14px;}
+
+  .score-badge{
+    display:inline-block;
+    font-size:12px;
+    font-weight:600;
+    color:var(--accent);
+    margin-top:2px;
+  }
+  .crit-row, .checklist-item-row{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    margin-bottom:8px;
+  }
+  .crit-row .crit-name{flex:1;font-size:14px;}
+  .crit-row select, .crit-row input[type=number]{
+    padding:7px 8px;
+    border:1px solid var(--line);
+    border-radius:7px;
+    background:#fff;
+    font-family:inherit;
+    font-size:13px;
+  }
+  .crit-row .crit-weight{width:56px;}
+  .crit-row .crit-score{width:64px;}
+  .icon-btn{
+    background:none;border:none;color:var(--ink-soft);
+    font-size:16px;cursor:pointer;padding:2px 6px;
+  }
+  .checklist-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;}
+  .checklist-row input[type=checkbox]{width:18px;height:18px;flex-shrink:0;}
+  .checklist-row input[type=text]{flex:1;}
+  .subheading{
+    font-family:'Fraunces',serif;
+    font-size:15px;
+    font-weight:600;
+    margin:20px 0 10px;
+  }
+  .price-history-item{
+    font-size:13px;
+    color:var(--ink-soft);
+    padding:4px 0;
+    border-bottom:1px dashed var(--line);
+  }
+  .add-mini-btn{
+    background:none;border:1px dashed var(--line);border-radius:7px;
+    color:var(--accent);font-family:inherit;font-size:12.5px;
+    padding:6px 10px;cursor:pointer;margin-top:4px;
+  }
+  #printArea{display:none;}
+  @media print{
+    body *{visibility:hidden;}
+    #printArea, #printArea *{visibility:visible;}
+    #printArea{
+      display:block;
+      position:absolute;left:0;top:0;width:100%;
+      padding:20px;
+    }
+    #printArea table{width:100%;border-collapse:collapse;}
+    #printArea th, #printArea td{
+      border:1px solid #999;padding:6px 8px;font-size:11px;text-align:left;
+    }
+    #printArea h1{font-size:18px;margin-bottom:12px;}
+  }
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="House Log">
+<meta name="theme-color" content="#F6F4EE">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>House Viewing Log</h1>
+    <div class="count" id="count">Loading…</div>
+  </header>
+  <div class="toolbar">
+    <button class="tool-btn" id="importBtn">Import from Excel</button>
+    <button class="tool-btn" id="templateBtn">Download template</button>
+    <button class="tool-btn" id="exportExcelBtn">Export to Excel</button>
+    <button class="tool-btn" id="exportPdfBtn">Export to PDF</button>
+    <button class="tool-btn" id="settingsBtn">⚙ Criteria &amp; checklist</button>
+  </div>
+  <input type="file" id="importInput" accept=".xlsx,.xls,.csv" style="display:none">
+  <div class="searchbar">
+    <input type="text" id="searchInput" placeholder="Search address, notes, pros/cons…">
+    <select id="sortSelect">
+      <option value="date-desc">Newest first</option>
+      <option value="date-asc">Oldest first</option>
+      <option value="price-asc">Price ↑</option>
+      <option value="price-desc">Price ↓</option>
+      <option value="pricepersqm-asc">Price/sqm ↑</option>
+      <option value="rating-desc">Rating ↓</option>
+      <option value="score-desc">Decision score ↓</option>
+      <option value="area-desc">Area ↓</option>
+    </select>
+  </div>
+  <div class="chipbar">
+    <button class="chip active" data-filter="all">All</button>
+    <button class="chip" data-filter="favorite">♥ Favorites</button>
+    <button class="chip" data-filter="issues">⚠ Has issues</button>
+    <button class="chip" id="compareToggle">☐ Compare</button>
+  </div>
+  <div id="list"></div>
+  <button class="fab" id="addBtn">＋</button>
+  <button class="compare-fab" id="compareFab">Compare (0)</button>
+</div>
+
+<div class="sheet-overlay" id="overlay"></div>
+<div class="sheet" id="sheet"></div>
+<div id="printArea"></div>
+
+<script>
+const STORAGE_KEY = "viewings-data";
+const SETTINGS_KEY = "settings-data";
+let records = [];
+let searchQuery = '';
+let filterMode = 'all'; // all | favorite | issues
+let sortKey = 'date-desc';
+let compareMode = false;
+let compareSelected = new Set();
+
+const DEFAULT_SETTINGS = {
+  criteria: [
+    {id:'location', name:'Location', weight:2},
+    {id:'layout', name:'Layout', weight:1},
+    {id:'light', name:'Natural light', weight:1},
+    {id:'condition', name:'Renovation condition', weight:1},
+    {id:'management', name:'Building management', weight:1},
+    {id:'value', name:'Value for price', weight:2}
+  ],
+  checklistItems: [
+    {id:'water', label:'Water pressure OK'},
+    {id:'sound', label:'Soundproofing OK'},
+    {id:'orientation', label:'Good orientation / sunlight'},
+    {id:'elevator', label:'Elevator working well'},
+    {id:'parking', label:'Parking available'},
+    {id:'odor', label:'No bad odor / damp smell'},
+    {id:'walls', label:'No visible wall / ceiling cracks'},
+    {id:'neighbors', label:'Talked to neighbors'}
+  ],
+  commuteLabel: 'Office'
+};
+let settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+async function loadSettings(){
+  try{
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      settings = Object.assign({}, DEFAULT_SETTINGS, parsed);
+      if(!Array.isArray(settings.criteria) || settings.criteria.length===0) settings.criteria = DEFAULT_SETTINGS.criteria;
+      if(!Array.isArray(settings.checklistItems)) settings.checklistItems = DEFAULT_SETTINGS.checklistItems;
+    }
+  }catch(e){
+    settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  }
+}
+
+async function persistSettings(){
+  try{
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }catch(e){
+    console.error('Save failed', e);
+    alert('Save failed, please try again');
+  }
+}
+
+async function load(){
+  document.getElementById('list').innerHTML = '<div class="loading">Loading…</div>';
+  await loadSettings();
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    records = raw ? (JSON.parse(raw).records || []) : [];
+  }catch(e){
+    records = [];
+  }
+  render();
+}
+
+async function persist(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({records}));
+  }catch(e){
+    console.error('Save failed', e);
+    alert('Save failed, please try again');
+  }
+}
+
+function fmtDate(d){
+  if(!d) return 'No date';
+  const dt = new Date(d + 'T00:00:00');
+  if(isNaN(dt)) return d;
+  return dt.toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'});
+}
+
+function starString(n){
+  n = n||0;
+  return '★★★★★☆☆☆☆☆'.slice(5-n, 10-n);
+}
+
+function roomSummary(r){
+  const parts = [];
+  if(r.bedrooms) parts.push(r.bedrooms + (r.bedrooms==1?' bed':' beds'));
+  if(r.studyRooms) parts.push(r.studyRooms + (r.studyRooms==1?' study':' studies'));
+  return parts.length ? parts.join(' · ') : 'Rooms not set';
+}
+
+function priceRangeText(r){
+  const lo = r.priceMin, hi = r.priceMax;
+  if(lo && hi && lo!==hi) return `${lo}–${hi} K`;
+  if(lo && hi && lo===hi) return `${lo} K`;
+  if(lo) return `${lo}+ K`;
+  if(hi) return `up to ${hi} K`;
+  return 'Price not set';
+}
+
+function avgPriceK(r){
+  const lo = parseFloat(r.priceMin), hi = parseFloat(r.priceMax);
+  if(lo && hi) return (lo+hi)/2;
+  if(lo) return lo;
+  if(hi) return hi;
+  return null;
+}
+
+function pricePerSqm(r){
+  const area = parseFloat(r.area);
+  const price = avgPriceK(r);
+  if(!area || area<=0 || price===null) return null;
+  return price/area;
+}
+
+function pricePerSqmText(r){
+  const v = pricePerSqm(r);
+  return v===null ? null : `${v.toFixed(2)}K/sqm`;
+}
+
+function decisionScore(r){
+  const criteria = settings.criteria || [];
+  let sumW=0, sumWS=0;
+  criteria.forEach(c=>{
+    const s = r.scores && r.scores[c.id];
+    if(s){ sumW += Number(c.weight)||0; sumWS += (Number(c.weight)||0)*Number(s); }
+  });
+  if(sumW===0) return null;
+  return sumWS/sumW;
+}
+
+function decisionScoreText(r){
+  const v = decisionScore(r);
+  return v===null ? null : `${v.toFixed(1)}/5`;
+}
+
+function checklistSummary(r){
+  const items = settings.checklistItems || [];
+  if(items.length===0) return null;
+  const checked = items.filter(it=> r.checklist && r.checklist[it.id]).length;
+  return `${checked}/${items.length}`;
+}
+
+function getFilteredSorted(){
+  let out = records.filter(r=>{
+    if(filterMode==='favorite' && !r.favorite) return false;
+    if(filterMode==='issues' && r.qualityIssues!=='yes') return false;
+    if(searchQuery){
+      const q = searchQuery.toLowerCase();
+      const haystack = [r.address, r.notes, r.pros, r.cons, r.qualityNotes, r.strataFee].join(' ').toLowerCase();
+      if(!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+  out.sort((a,b)=>{
+    switch(sortKey){
+      case 'date-asc': return (a.date||'').localeCompare(b.date||'');
+      case 'price-asc': return (avgPriceK(a)??Infinity) - (avgPriceK(b)??Infinity);
+      case 'price-desc': return (avgPriceK(b)??-Infinity) - (avgPriceK(a)??-Infinity);
+      case 'pricepersqm-asc': return (pricePerSqm(a)??Infinity) - (pricePerSqm(b)??Infinity);
+      case 'rating-desc': return (b.rating||0) - (a.rating||0);
+      case 'score-desc': return (decisionScore(b)??-Infinity) - (decisionScore(a)??-Infinity);
+      case 'area-desc': return (parseFloat(b.area)||0) - (parseFloat(a.area)||0);
+      case 'date-desc':
+      default: return (b.date||'').localeCompare(a.date||'');
+    }
+  });
+  return out;
+}
+
+function render(){
+  const list = document.getElementById('list');
+  const filtered = getFilteredSorted();
+  document.getElementById('count').textContent = records.length
+    ? (filtered.length===records.length ? `${records.length} propert${records.length===1?'y':'ies'}` : `${filtered.length} of ${records.length}`)
+    : '';
+
+  if(records.length===0){
+    list.innerHTML = `<div class="empty">
+      <div class="big">No records yet</div>
+      <p>Tap the “＋” button below<br>to log your first house viewing.</p>
+    </div>`;
+    updateCompareFab();
+    return;
+  }
+  if(filtered.length===0){
+    list.innerHTML = `<div class="empty">
+      <div class="big">No matches</div>
+      <p>Try a different search term or filter.</p>
+    </div>`;
+    updateCompareFab();
+    return;
+  }
+
+  list.innerHTML = filtered.map(r => `
+    <div class="row" data-id="${r.id}">
+      ${compareMode ? `<div class="row-check"><input type="checkbox" data-id="${r.id}" ${compareSelected.has(r.id)?'checked':''}></div>` : ''}
+      <div class="row-main">
+        <p class="row-address">${r.favorite ? '<span class="fav-mark">♥</span>' : ''}${escapeHtml(r.address||'Unnamed property')}</p>
+        <div class="row-meta">${priceRangeText(r)}${pricePerSqmText(r) ? ' ('+pricePerSqmText(r)+')' : ''} · ${r.area?r.area+' sqm':'Area not set'} · ${roomSummary(r)}</div>
+      </div>
+      <div class="row-side">
+        <div class="stars">${starString(r.rating)}</div>
+        ${decisionScoreText(r) ? `<div class="score-badge">${decisionScoreText(r)}</div>` : ''}
+        <div class="row-date">${fmtDate(r.date)}</div>
+      </div>
+    </div>
+  `).join('');
+
+  if(compareMode){
+    list.querySelectorAll('.row-check input').forEach(cb=>{
+      cb.addEventListener('click', e=> e.stopPropagation());
+      cb.addEventListener('change', ()=>{
+        if(cb.checked){
+          if(compareSelected.size>=4){ cb.checked=false; alert('You can compare up to 4 properties at a time.'); return; }
+          compareSelected.add(cb.dataset.id);
+        }else{
+          compareSelected.delete(cb.dataset.id);
+        }
+        updateCompareFab();
+      });
+    });
+    list.querySelectorAll('.row').forEach(el=>{
+      el.addEventListener('click', (e)=>{
+        if(e.target.tagName==='INPUT') return;
+        const cb = el.querySelector('.row-check input');
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+    });
+  }else{
+    list.querySelectorAll('.row').forEach(el=>{
+      el.addEventListener('click', ()=> openDetail(el.dataset.id));
+    });
+  }
+  updateCompareFab();
+}
+
+function updateCompareFab(){
+  const fab = document.getElementById('compareFab');
+  if(!compareMode || compareSelected.size<2){
+    fab.classList.remove('show');
+  }else{
+    fab.classList.add('show');
+    fab.textContent = `Compare (${compareSelected.size})`;
+  }
+}
+
+function escapeHtml(s){
+  return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function openOverlay(){
+  document.getElementById('overlay').classList.add('open');
+  document.getElementById('sheet').classList.add('open');
+}
+function closeOverlay(){
+  document.getElementById('overlay').classList.remove('open');
+  document.getElementById('sheet').classList.remove('open');
+  setTimeout(()=>{ document.getElementById('sheet').innerHTML=''; }, 250);
+}
+document.getElementById('overlay').addEventListener('click', closeOverlay);
+
+function openDetail(id){
+  const r = records.find(x=>x.id===id);
+  if(!r) return;
+  renderDetail(r);
+  openOverlay();
+}
+
+function renderDetail(r){
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>${escapeHtml(r.address||'Unnamed property')}</h2>
+    <div class="detail-block">
+      <div class="detail-label">Viewing date</div>
+      <div class="detail-value">${fmtDate(r.date)}</div>
+    </div>
+    <div class="row3">
+      <div class="detail-block">
+        <div class="detail-label">Price</div>
+        <div class="detail-value">${priceRangeText(r)}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Area</div>
+        <div class="detail-value">${r.area?r.area+' sqm':'—'}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Price/sqm</div>
+        <div class="detail-value">${pricePerSqmText(r) || '—'}</div>
+      </div>
+    </div>
+    <div class="row3">
+      <div class="detail-block">
+        <div class="detail-label">Bedrooms</div>
+        <div class="detail-value">${r.bedrooms || '—'}</div>
+      </div>
+      <div class="detail-block">
+        <div class="detail-label">Study rooms</div>
+        <div class="detail-value">${r.studyRooms || '—'}</div>
+      </div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Strata fee</div>
+      <div class="detail-value">${r.strataFee ? r.strataFee : '—'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Rating</div>
+      <div class="stars" style="font-size:20px">${starString(r.rating)}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Decision score (weighted)</div>
+      <div class="detail-value">${decisionScoreText(r) || 'Not scored yet'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Commute to ${escapeHtml(settings.commuteLabel||'destination')}</div>
+      <div class="detail-value">${r.commuteMinutes ? r.commuteMinutes + ' min' : '—'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Viewing checklist</div>
+      <div class="detail-value">${checklistSummary(r) ? checklistSummary(r)+' checked' : 'No checklist items configured'}</div>
+      ${(settings.checklistItems||[]).map(it=>`<div style="font-size:13px;color:${r.checklist&&r.checklist[it.id]?'var(--good)':'var(--ink-soft)'};padding:2px 0;">${r.checklist&&r.checklist[it.id]?'✓':'○'} ${escapeHtml(it.label)}</div>`).join('')}
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Price history</div>
+      ${(r.priceHistory&&r.priceHistory.length) ? r.priceHistory.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(h=>`<div class="price-history-item">${fmtDate(h.date)} — ${h.priceMin&&h.priceMax?(h.priceMin===h.priceMax?h.priceMin+' K':h.priceMin+'–'+h.priceMax+' K'):'—'}</div>`).join('') : '<div class="detail-value">No price changes logged yet</div>'}
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Building quality issues</div>
+      <div class="detail-value ${r.qualityIssues==='yes' ? 'tag-concern' : ''}">${r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No known issues' : 'Not noted')}${r.qualityNotes ? ' — ' + escapeHtml(r.qualityNotes) : ''}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Pros</div>
+      <div class="detail-value tag-good">${escapeHtml(r.pros)||'—'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Cons / concerns</div>
+      <div class="detail-value tag-concern">${escapeHtml(r.cons)||'—'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Notes</div>
+      <div class="detail-value">${escapeHtml(r.notes)||'—'}</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="editBtn">Edit</button>
+      <button class="btn btn-danger" id="delBtn">Delete</button>
+      <button class="btn btn-primary" id="closeBtn">Close</button>
+    </div>
+  `;
+  sheet.querySelector('#closeBtn').addEventListener('click', closeOverlay);
+  sheet.querySelector('#editBtn').addEventListener('click', ()=> openForm(r));
+  sheet.querySelector('#delBtn').addEventListener('click', async ()=>{
+    if(confirm('Delete this viewing record?')){
+      records = records.filter(x=>x.id!==r.id);
+      await persist();
+      render();
+      closeOverlay();
+    }
+  });
+}
+
+function openForm(existing){
+  const r = existing || {id:uid(), address:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', studyRooms:'', strataFee:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', priceHistory:[]};
+  if(!r.scores) r.scores = {};
+  if(!r.checklist) r.checklist = {};
+  if(!r.priceHistory) r.priceHistory = [];
+  let rating = r.rating||0;
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>${existing ? 'Edit record' : 'New viewing record'}</h2>
+    <div class="field">
+      <label>Address / building name</label>
+      <input type="text" id="f_address" value="${escapeHtml(r.address)}" placeholder="e.g. 502, Building 3, Osmanthus Court">
+    </div>
+    <div class="field">
+      <label>Viewing date</label>
+      <input type="date" id="f_date" value="${r.date||''}">
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Price min (K)</label>
+        <input type="number" id="f_priceMin" value="${r.priceMin||''}" placeholder="260">
+      </div>
+      <div class="field">
+        <label>Price max (K)</label>
+        <input type="number" id="f_priceMax" value="${r.priceMax||''}" placeholder="300">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Area (sqm)</label>
+        <input type="number" id="f_area" value="${r.area||''}" placeholder="88">
+      </div>
+      <div class="field">
+        <label>Strata fee</label>
+        <input type="text" id="f_strataFee" value="${escapeHtml(r.strataFee)}" placeholder="e.g. 350/month">
+      </div>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Bedrooms</label>
+        <input type="number" min="0" id="f_bedrooms" value="${r.bedrooms||''}" placeholder="2">
+      </div>
+      <div class="field">
+        <label>Study rooms</label>
+        <input type="number" min="0" id="f_studyRooms" value="${r.studyRooms||''}" placeholder="1">
+      </div>
+    </div>
+    <div class="field">
+      <label>Rating</label>
+      <div class="star-picker" id="starPicker">
+        ${[1,2,3,4,5].map(n=>`<span data-n="${n}" class="${n<=rating?'on':''}">★</span>`).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <label>Commute to ${escapeHtml(settings.commuteLabel||'destination')} (min)</label>
+      <input type="number" min="0" id="f_commute" value="${r.commuteMinutes||''}" placeholder="30">
+    </div>
+    <div class="field">
+      <label>Building quality issues</label>
+      <select id="f_qualityIssues" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+        <option value="" ${r.qualityIssues===''?'selected':''}>Not noted</option>
+        <option value="no" ${r.qualityIssues==='no'?'selected':''}>No known issues</option>
+        <option value="yes" ${r.qualityIssues==='yes'?'selected':''}>Yes — has issues</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Quality issue details (if any)</label>
+      <textarea id="f_qualityNotes" placeholder="e.g. cracks in walls, water leakage, poor construction…">${escapeHtml(r.qualityNotes)}</textarea>
+    </div>
+    <div class="subheading">Decision criteria (score 1–5)</div>
+    ${(settings.criteria||[]).map(c=>`
+      <div class="crit-row">
+        <div class="crit-name">${escapeHtml(c.name)} <span style="color:var(--ink-soft);font-size:12px;">(weight ${c.weight})</span></div>
+        <select class="crit-score" data-crit="${c.id}">
+          <option value="">—</option>
+          ${[1,2,3,4,5].map(n=>`<option value="${n}" ${r.scores[c.id]==n?'selected':''}>${n}</option>`).join('')}
+        </select>
+      </div>
+    `).join('') || '<div class="detail-value" style="color:var(--ink-soft);">No criteria set up yet — add some in ⚙ Criteria &amp; checklist.</div>'}
+    <div class="subheading">Viewing checklist</div>
+    ${(settings.checklistItems||[]).map(it=>`
+      <label class="checklist-row">
+        <input type="checkbox" class="chk-item" data-item="${it.id}" ${r.checklist[it.id]?'checked':''}>
+        ${escapeHtml(it.label)}
+      </label>
+    `).join('') || '<div class="detail-value" style="color:var(--ink-soft);">No checklist items set up yet.</div>'}
+    <div class="field">
+      <label>Pros</label>
+      <textarea id="f_pros" placeholder="Good light, close to subway…">${escapeHtml(r.pros)}</textarea>
+    </div>
+    <div class="field">
+      <label>Cons / concerns</label>
+      <textarea id="f_cons" placeholder="Noisy, low floor…">${escapeHtml(r.cons)}</textarea>
+    </div>
+    <div class="field">
+      <label>Other notes</label>
+      <textarea id="f_notes" placeholder="Agent contact, negotiation room, etc.">${escapeHtml(r.notes)}</textarea>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="f_fav" ${r.favorite?'checked':''} style="width:auto;margin-right:6px;vertical-align:middle;">Mark as favorite</label>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn">Save</button>
+    </div>
+  `;
+  sheet.querySelectorAll('#starPicker span').forEach(s=>{
+    s.addEventListener('click', ()=>{
+      rating = parseInt(s.dataset.n);
+      sheet.querySelectorAll('#starPicker span').forEach(x=> x.classList.toggle('on', parseInt(x.dataset.n)<=rating));
+    });
+  });
+  sheet.querySelector('#cancelBtn').addEventListener('click', closeOverlay);
+  sheet.querySelector('#saveBtn').addEventListener('click', async ()=>{
+    const scores = {};
+    sheet.querySelectorAll('.crit-score').forEach(sel=>{
+      if(sel.value) scores[sel.dataset.crit] = Number(sel.value);
+    });
+    const checklist = {};
+    sheet.querySelectorAll('.chk-item').forEach(cb=>{
+      checklist[cb.dataset.item] = cb.checked;
+    });
+    const newPriceMin = sheet.querySelector('#f_priceMin').value;
+    const newPriceMax = sheet.querySelector('#f_priceMax').value;
+    const priceHistory = Array.isArray(r.priceHistory) ? r.priceHistory.slice() : [];
+    const lastEntry = priceHistory[priceHistory.length-1];
+    if((newPriceMin || newPriceMax) && (!lastEntry || lastEntry.priceMin !== newPriceMin || lastEntry.priceMax !== newPriceMax)){
+      priceHistory.push({date: new Date().toISOString().slice(0,10), priceMin: newPriceMin, priceMax: newPriceMax});
+    }
+    const updated = {
+      id:r.id,
+      address: sheet.querySelector('#f_address').value.trim(),
+      date: sheet.querySelector('#f_date').value,
+      priceMin: newPriceMin,
+      priceMax: newPriceMax,
+      area: sheet.querySelector('#f_area').value,
+      strataFee: sheet.querySelector('#f_strataFee').value.trim(),
+      bedrooms: sheet.querySelector('#f_bedrooms').value,
+      studyRooms: sheet.querySelector('#f_studyRooms').value,
+      commuteMinutes: sheet.querySelector('#f_commute').value,
+      qualityIssues: sheet.querySelector('#f_qualityIssues').value,
+      qualityNotes: sheet.querySelector('#f_qualityNotes').value.trim(),
+      rating: rating,
+      scores,
+      checklist,
+      priceHistory,
+      pros: sheet.querySelector('#f_pros').value.trim(),
+      cons: sheet.querySelector('#f_cons').value.trim(),
+      notes: sheet.querySelector('#f_notes').value.trim(),
+      favorite: sheet.querySelector('#f_fav').checked
+    };
+    if(!updated.address){
+      alert('Please enter at least the property address');
+      return;
+    }
+    const idx = records.findIndex(x=>x.id===updated.id);
+    if(idx>=0) records[idx]=updated; else records.push(updated);
+    await persist();
+    render();
+    closeOverlay();
+  });
+  openOverlay();
+}
+
+document.getElementById('addBtn').addEventListener('click', ()=> openForm(null));
+
+// ---------- Search / filter / sort / compare ----------
+
+document.getElementById('searchInput').addEventListener('input', (e)=>{
+  searchQuery = e.target.value.trim();
+  render();
+});
+
+document.getElementById('sortSelect').addEventListener('change', (e)=>{
+  sortKey = e.target.value;
+  render();
+});
+
+document.querySelectorAll('.chip[data-filter]').forEach(chip=>{
+  chip.addEventListener('click', ()=>{
+    filterMode = chip.dataset.filter;
+    document.querySelectorAll('.chip[data-filter]').forEach(c=> c.classList.toggle('active', c===chip));
+    render();
+  });
+});
+
+document.getElementById('compareToggle').addEventListener('click', ()=>{
+  compareMode = !compareMode;
+  document.getElementById('compareToggle').classList.toggle('active', compareMode);
+  document.getElementById('compareToggle').textContent = compareMode ? '☑ Compare' : '☐ Compare';
+  if(!compareMode) compareSelected.clear();
+  render();
+});
+
+document.getElementById('compareFab').addEventListener('click', ()=> openCompare());
+
+function openCompare(){
+  const items = records.filter(r=> compareSelected.has(r.id));
+  if(items.length<2) return;
+  const rowsDef = [
+    {label:'Price', fn: r=> priceRangeText(r)},
+    {label:'Price/sqm', fn: r=> pricePerSqmText(r) || '—'},
+    {label:'Area', fn: r=> r.area ? r.area+' sqm' : '—'},
+    {label:'Bedrooms', fn: r=> r.bedrooms || '—'},
+    {label:'Study rooms', fn: r=> r.studyRooms || '—'},
+    {label:'Strata fee', fn: r=> r.strataFee || '—'},
+    {label:'Rating', fn: r=> starString(r.rating)},
+    {label:'Quality issues', fn: r=> r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No' : 'Not noted')},
+    {label:'Pros', fn: r=> escapeHtml(r.pros)||'—'},
+    {label:'Cons', fn: r=> escapeHtml(r.cons)||'—'},
+    {label:'Viewing date', fn: r=> fmtDate(r.date)}
+  ];
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>Compare ${items.length} properties</h2>
+    <div class="compare-scroll">
+      <table class="compare-table">
+        <thead><tr><th></th>${items.map(r=>`<th>${escapeHtml(r.address||'Unnamed')}</th>`).join('')}</tr></thead>
+        <tbody>
+          ${rowsDef.map(rd=>`<tr><td>${rd.label}</td>${items.map(r=>`<td>${rd.fn(r)}</td>`).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="closeCompareBtn">Close</button>
+    </div>
+  `;
+  sheet.querySelector('#closeCompareBtn').addEventListener('click', closeOverlay);
+  openOverlay();
+}
+
+// ---------- Settings: decision criteria & checklist ----------
+
+function openSettings(){
+  const sheet = document.getElementById('sheet');
+  const localCriteria = JSON.parse(JSON.stringify(settings.criteria||[]));
+  const localChecklist = JSON.parse(JSON.stringify(settings.checklistItems||[]));
+
+  function renderSettingsForm(){
+    sheet.innerHTML = `
+      <div class="sheet-handle"></div>
+      <h2>Criteria &amp; checklist</h2>
+      <div class="subheading">Commute destination label</div>
+      <div class="field">
+        <input type="text" id="s_commuteLabel" value="${escapeHtml(settings.commuteLabel||'')}" placeholder="e.g. Office, Kids' school">
+      </div>
+      <div class="subheading">Decision criteria (weighted score)</div>
+      <div id="critList"></div>
+      <button class="add-mini-btn" id="addCritBtn">+ Add criterion</button>
+      <div class="subheading">Viewing checklist items</div>
+      <div id="checklistList"></div>
+      <button class="add-mini-btn" id="addChecklistBtn">+ Add item</button>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="settingsCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="settingsSaveBtn">Save</button>
+      </div>
+    `;
+    const critList = sheet.querySelector('#critList');
+    critList.innerHTML = localCriteria.map((c,i)=>`
+      <div class="crit-row">
+        <input type="text" class="crit-name-input" data-i="${i}" value="${escapeHtml(c.name)}" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:13px;">
+        <input type="number" min="1" max="5" class="crit-weight" data-i="${i}" value="${c.weight}" title="Weight">
+        <button class="icon-btn crit-remove" data-i="${i}">✕</button>
+      </div>
+    `).join('');
+    const checklistList = sheet.querySelector('#checklistList');
+    checklistList.innerHTML = localChecklist.map((it,i)=>`
+      <div class="checklist-item-row">
+        <input type="text" class="chk-label-input" data-i="${i}" value="${escapeHtml(it.label)}" style="flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font-family:inherit;font-size:13px;">
+        <button class="icon-btn chk-remove" data-i="${i}">✕</button>
+      </div>
+    `).join('');
+
+    sheet.querySelectorAll('.crit-name-input').forEach(inp=> inp.addEventListener('input', ()=> localCriteria[inp.dataset.i].name = inp.value));
+    sheet.querySelectorAll('.crit-weight').forEach(inp=> inp.addEventListener('input', ()=> localCriteria[inp.dataset.i].weight = Number(inp.value)||1));
+    sheet.querySelectorAll('.crit-remove').forEach(btn=> btn.addEventListener('click', ()=>{ localCriteria.splice(Number(btn.dataset.i),1); renderSettingsForm(); }));
+    sheet.querySelectorAll('.chk-label-input').forEach(inp=> inp.addEventListener('input', ()=> localChecklist[inp.dataset.i].label = inp.value));
+    sheet.querySelectorAll('.chk-remove').forEach(btn=> btn.addEventListener('click', ()=>{ localChecklist.splice(Number(btn.dataset.i),1); renderSettingsForm(); }));
+
+    sheet.querySelector('#addCritBtn').addEventListener('click', ()=>{
+      localCriteria.push({id:'c'+uid(), name:'New criterion', weight:1});
+      renderSettingsForm();
+    });
+    sheet.querySelector('#addChecklistBtn').addEventListener('click', ()=>{
+      localChecklist.push({id:'i'+uid(), label:'New checklist item'});
+      renderSettingsForm();
+    });
+    sheet.querySelector('#settingsCancelBtn').addEventListener('click', closeOverlay);
+    sheet.querySelector('#settingsSaveBtn').addEventListener('click', async ()=>{
+      settings.commuteLabel = sheet.querySelector('#s_commuteLabel').value.trim();
+      settings.criteria = localCriteria.filter(c=>c.name.trim());
+      settings.checklistItems = localChecklist.filter(it=>it.label.trim());
+      await persistSettings();
+      render();
+      closeOverlay();
+    });
+  }
+  renderSettingsForm();
+  openOverlay();
+}
+
+document.getElementById('settingsBtn').addEventListener('click', openSettings);
+
+// ---------- Export ----------
+
+function buildExportRows(){
+  return getFilteredSorted().map(r=>({
+    'Address': r.address,
+    'Date': r.date,
+    'Price Min': r.priceMin,
+    'Price Max': r.priceMax,
+    'Price/sqm': pricePerSqm(r) !== null ? pricePerSqm(r).toFixed(2) : '',
+    'Area': r.area,
+    'Bedrooms': r.bedrooms,
+    'Study Rooms': r.studyRooms,
+    'Strata Fee': r.strataFee,
+    'Commute (min)': r.commuteMinutes,
+    'Quality Issues': r.qualityIssues==='yes'?'Yes':(r.qualityIssues==='no'?'No':''),
+    'Quality Notes': r.qualityNotes,
+    'Rating': r.rating,
+    'Decision Score': decisionScore(r) !== null ? decisionScore(r).toFixed(1) : '',
+    'Checklist': checklistSummary(r) || '',
+    'Pros': r.pros,
+    'Cons': r.cons,
+    'Notes': r.notes,
+    'Favorite': r.favorite ? 'Yes' : 'No'
+  }));
+}
+
+function exportToExcel(){
+  if(records.length===0){ alert('No records to export.'); return; }
+  const rows = buildExportRows();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Viewings');
+  XLSX.writeFile(wb, 'house-viewing-log.xlsx');
+}
+
+function exportToPdf(){
+  if(records.length===0){ alert('No records to export.'); return; }
+  const rows = buildExportRows();
+  const headers = Object.keys(rows[0]);
+  const printArea = document.getElementById('printArea');
+  printArea.innerHTML = `
+    <h1>House Viewing Log</h1>
+    <table>
+      <thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map(row=>`<tr>${headers.map(h=>`<td>${escapeHtml(String(row[h]??''))}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>
+  `;
+  window.print();
+}
+
+document.getElementById('exportExcelBtn').addEventListener('click', exportToExcel);
+document.getElementById('exportPdfBtn').addEventListener('click', exportToPdf);
+
+// ---------- Excel / CSV import ----------
+
+const FIELD_ALIASES = {
+  address: ['address','property','propertyaddress','name','building','apartment','unit'],
+  date: ['date','viewingdate','visitdate'],
+  priceMin: ['pricemin','minprice','pricelow','pricefrom'],
+  priceMax: ['pricemax','maxprice','pricehigh','priceto'],
+  price: ['price','totalprice','askingprice'],
+  area: ['area','sqm','size','squaremeters','squarefeet'],
+  bedrooms: ['bedrooms','beds','bedroom','br'],
+  studyRooms: ['studyrooms','study','den','studyroom'],
+  strataFee: ['stratafee','strata','hoa','maintenancefee','managementfee'],
+  commuteMinutes: ['commute','commutetime','commuteminutes','commutemins'],
+  qualityIssues: ['qualityissues','qualityissue','issues'],
+  qualityNotes: ['qualitynotes','issuedetails','defects','qualitydetails'],
+  rating: ['rating','stars','score'],
+  pros: ['pros','pro','positives'],
+  cons: ['cons','con','negatives','concerns'],
+  notes: ['notes','note','comments','remarks'],
+  favorite: ['favorite','favourite','liked','starred']
+};
+
+function normKey(k){
+  return String(k).toLowerCase().replace(/[^a-z0-9]/g,'');
+}
+
+function excelSerialToDateStr(n){
+  // Excel serial date (days since 1899-12-30)
+  const d = new Date(Math.round((n - 25569) * 86400 * 1000));
+  return isNaN(d) ? '' : d.toISOString().slice(0,10);
+}
+
+function rowToRecord(row){
+  const normalized = {};
+  Object.keys(row).forEach(k=>{ normalized[normKey(k)] = row[k]; });
+  function pick(field){
+    const aliases = FIELD_ALIASES[field] || [field];
+    for(const a of aliases){
+      if(normalized[a] !== undefined && normalized[a] !== '') return normalized[a];
+    }
+    return '';
+  }
+
+  const address = String(pick('address') || '').trim();
+
+  let dateVal = pick('date');
+  let dateStr = '';
+  if(dateVal instanceof Date && !isNaN(dateVal)){
+    dateStr = dateVal.toISOString().slice(0,10);
+  }else if(typeof dateVal === 'number'){
+    dateStr = excelSerialToDateStr(dateVal);
+  }else if(dateVal){
+    const d = new Date(dateVal);
+    dateStr = isNaN(d) ? '' : d.toISOString().slice(0,10);
+  }
+
+  let priceMin = pick('priceMin');
+  let priceMax = pick('priceMax');
+  const genericPrice = pick('price');
+  if(!priceMin && !priceMax && genericPrice){ priceMin = genericPrice; priceMax = genericPrice; }
+
+  let rating = parseInt(pick('rating'), 10);
+  if(isNaN(rating)) rating = 0;
+  rating = Math.max(0, Math.min(5, rating));
+
+  const favRaw = String(pick('favorite') || '').toLowerCase().trim();
+  const favorite = ['yes','y','true','1'].includes(favRaw);
+
+  const qiRaw = String(pick('qualityIssues') || '').toLowerCase().trim();
+  let qualityIssues = '';
+  if(['yes','y','true','1'].includes(qiRaw)) qualityIssues = 'yes';
+  else if(['no','n','false','0'].includes(qiRaw)) qualityIssues = 'no';
+
+  return {
+    id: uid(),
+    address,
+    date: dateStr,
+    priceMin: priceMin !== '' ? String(priceMin) : '',
+    priceMax: priceMax !== '' ? String(priceMax) : '',
+    area: pick('area') !== '' ? String(pick('area')) : '',
+    bedrooms: pick('bedrooms') !== '' ? String(pick('bedrooms')) : '',
+    studyRooms: pick('studyRooms') !== '' ? String(pick('studyRooms')) : '',
+    strataFee: pick('strataFee') !== '' ? String(pick('strataFee')) : '',
+    commuteMinutes: pick('commuteMinutes') !== '' ? String(pick('commuteMinutes')) : '',
+    qualityIssues,
+    qualityNotes: pick('qualityNotes') !== '' ? String(pick('qualityNotes')) : '',
+    rating,
+    pros: pick('pros') !== '' ? String(pick('pros')) : '',
+    cons: pick('cons') !== '' ? String(pick('cons')) : '',
+    notes: pick('notes') !== '' ? String(pick('notes')) : '',
+    favorite,
+    scores: {},
+    checklist: {},
+    priceHistory: []
+  };
+}
+
+async function handleImportFile(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const sheetName = wb.SheetNames[0];
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
+    if(rows.length === 0){
+      alert('No rows were found in this file.');
+      return;
+    }
+    const imported = rows.map(rowToRecord).filter(r => r.address);
+    if(imported.length === 0){
+      alert('Could not find an address for any row. Make sure there is a column like "Address" or "Property".');
+      return;
+    }
+    records = records.concat(imported);
+    await persist();
+    render();
+    const skipped = rows.length - imported.length;
+    alert(`Imported ${imported.length} record${imported.length===1?'':'s'}.` + (skipped ? ` (${skipped} row${skipped===1?'':'s'} skipped — no address found.)` : ''));
+  }catch(err){
+    console.error(err);
+    alert('Could not read this file. Please make sure it is a valid Excel (.xlsx/.xls) or CSV file.');
+  }finally{
+    e.target.value = '';
+  }
+}
+
+function downloadTemplate(){
+  const headers = ['Address','Date','Price Min','Price Max','Area','Bedrooms','Study Rooms','Strata Fee','Commute (min)','Quality Issues','Quality Notes','Rating','Pros','Cons','Notes','Favorite'];
+  const example = ['123 Example St, Unit 5','2026-03-15','260','300','88','2','1','350/month','25','No','','4','Good light, near subway','Street noise','Agent: Jane 555-1234','No'];
+  const esc = v => `"${String(v).replace(/"/g,'""')}"`;
+  const csv = headers.map(esc).join(',') + '\n' + example.map(esc).join(',');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'house-viewing-template.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('importInput').click());
+document.getElementById('importInput').addEventListener('change', handleImportFile);
+document.getElementById('templateBtn').addEventListener('click', downloadTemplate);
+
+load();
+
+// PWA: register the service worker when served from a web origin (HTTPS/localhost).
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(console.error));
+}
+</script>
+</body>
+</html>
