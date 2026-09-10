@@ -12,6 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root{
     --paper:#F6F4EE;
@@ -257,7 +258,7 @@
   .sheet{
     position:fixed;
     left:0;right:0;bottom:0;
-    max-width:800px;
+    max-width:480px;
     margin:0 auto;
     background:var(--paper-raised);
     border-radius:18px 18px 0 0;
@@ -394,9 +395,23 @@
 </head>
 <body>
 <div class="app">
+  <div id="authGate" style="display:none;padding:60px 4px 0;">
+    <h1 style="font-family:'Fraunces',serif;font-size:24px;margin:0 0 4px;">House Viewing Log</h1>
+    <p style="color:var(--ink-soft);font-size:14px;margin:0 0 24px;">Sign in to sync your data across devices.</p>
+    <div class="field"><label>Email</label><input type="email" id="auth_email"></div>
+    <div class="field"><label>Password</label><input type="password" id="auth_password"></div>
+    <div id="authError" style="color:var(--concern);font-size:13px;margin-bottom:8px;"></div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="authSignInBtn">Sign in</button>
+    </div>
+  </div>
+  <div id="appMain">
   <header>
     <h1>House Viewing Log</h1>
-    <div class="count" id="count">Loading…</div>
+    <div style="text-align:right;">
+      <div class="count" id="count">Loading…</div>
+      <div id="syncStatus" style="font-size:11px;color:var(--ink-soft);"></div>
+    </div>
   </header>
   <div class="toolbar">
     <button class="tool-btn" id="importBtn">Import from Excel</button>
@@ -404,6 +419,7 @@
     <button class="tool-btn" id="exportExcelBtn">Export to Excel</button>
     <button class="tool-btn" id="exportPdfBtn">Export to PDF</button>
     <button class="tool-btn" id="settingsBtn">⚙ Criteria &amp; checklist</button>
+    <button class="tool-btn" id="signOutBtn" style="display:none;">Sign out</button>
   </div>
   <input type="file" id="importInput" accept=".xlsx,.xls,.csv" style="display:none">
   <div class="searchbar">
@@ -428,6 +444,7 @@
   <div id="list"></div>
   <button class="fab" id="addBtn">＋</button>
   <button class="compare-fab" id="compareFab">Compare (0)</button>
+  </div>
 </div>
 
 <div class="sheet-overlay" id="overlay"></div>
@@ -435,6 +452,24 @@
 <div id="printArea"></div>
 
 <script>
+// ---------- Cloud sync (Supabase) ----------
+// Fill these in after creating your free Supabase project (Project Settings → API).
+// Leave them as-is and the app works exactly as before, saving only to this device.
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';       // e.g. https://xxxxxxxx.supabase.co
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+
+function isSupabaseConfigured(){
+  return SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 10;
+}
+const cloudEnabled = isSupabaseConfigured();
+const sb = cloudEnabled ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let currentUserId = null;
+
+function setSyncStatus(text){
+  const el = document.getElementById('syncStatus');
+  if(el) el.textContent = text;
+}
+
 const STORAGE_KEY = "viewings-data";
 const SETTINGS_KEY = "settings-data";
 let records = [];
@@ -469,12 +504,21 @@ let settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
+async function localGet(key){
+  try{
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+async function localSet(key, value){
+  try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){ console.error('Local save failed', e); }
+}
+
 async function loadSettings(){
   try{
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if(raw){
-      const parsed = JSON.parse(raw);
-      settings = Object.assign({}, DEFAULT_SETTINGS, parsed);
+    const cached = await localGet(SETTINGS_KEY);
+    if(cached){
+      settings = Object.assign({}, DEFAULT_SETTINGS, cached);
       if(!Array.isArray(settings.criteria) || settings.criteria.length===0) settings.criteria = DEFAULT_SETTINGS.criteria;
       if(!Array.isArray(settings.checklistItems)) settings.checklistItems = DEFAULT_SETTINGS.checklistItems;
     }
@@ -483,35 +527,111 @@ async function loadSettings(){
   }
 }
 
-async function persistSettings(){
+async function saveAll(){
+  await localSet(STORAGE_KEY, {records});
+  await localSet(SETTINGS_KEY, settings);
+  if(cloudEnabled && currentUserId){
+    setSyncStatus('Syncing…');
+    try{
+      const { error } = await sb.from('app_data').upsert({ user_id: currentUserId, records, settings, updated_at: new Date().toISOString() });
+      setSyncStatus(error ? '⚠ Sync failed — saved on this device only' : '☁ Synced');
+      if(error) console.error(error);
+    }catch(e){
+      console.error(e);
+      setSyncStatus('⚠ Sync failed — saved on this device only');
+    }
+  }
+}
+
+async function persistSettings(){ await saveAll(); }
+
+async function pullFromCloud(){
+  if(!(cloudEnabled && currentUserId)) return false;
+  setSyncStatus('Syncing…');
   try{
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    const { data, error } = await sb.from('app_data').select('records, settings').eq('user_id', currentUserId).maybeSingle();
+    if(error) throw error;
+    if(data){
+      records = data.records || [];
+      if(data.settings){
+        settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
+        if(!Array.isArray(settings.criteria) || settings.criteria.length===0) settings.criteria = DEFAULT_SETTINGS.criteria;
+        if(!Array.isArray(settings.checklistItems)) settings.checklistItems = DEFAULT_SETTINGS.checklistItems;
+      }
+      await localSet(STORAGE_KEY, {records});
+      await localSet(SETTINGS_KEY, settings);
+      setSyncStatus('☁ Synced');
+      return true;
+    }else{
+      await saveAll();
+      setSyncStatus('☁ Synced');
+      return true;
+    }
   }catch(e){
-    console.error('Save failed', e);
-    alert('Save failed, please try again');
+    console.error(e);
+    setSyncStatus('⚠ Offline — showing last saved copy');
+    return false;
   }
 }
 
 async function load(){
   document.getElementById('list').innerHTML = '<div class="loading">Loading…</div>';
   await loadSettings();
-  try{
-    const raw = localStorage.getItem(STORAGE_KEY);
-    records = raw ? (JSON.parse(raw).records || []) : [];
-  }catch(e){
-    records = [];
-  }
+  const cachedRecords = await localGet(STORAGE_KEY);
+  records = cachedRecords ? (cachedRecords.records || []) : [];
   render();
+  if(cloudEnabled && currentUserId){
+    const ok = await pullFromCloud();
+    if(ok) render();
+  }
 }
 
-async function persist(){
-  try{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({records}));
-  }catch(e){
-    console.error('Save failed', e);
-    alert('Save failed, please try again');
+async function persist(){ await saveAll(); }
+
+async function initAuthAndLoad(){
+  if(!cloudEnabled){
+    await load();
+    return;
   }
+  const { data: { session } } = await sb.auth.getSession();
+  if(session){
+    currentUserId = session.user.id;
+    document.getElementById('authGate').style.display = 'none';
+    document.getElementById('appMain').style.display = 'block';
+    document.getElementById('signOutBtn').style.display = 'inline';
+    await load();
+  }else{
+    document.getElementById('authGate').style.display = 'block';
+    document.getElementById('appMain').style.display = 'none';
+  }
+  sb.auth.onAuthStateChange((event, session)=>{
+    if(session && session.user.id !== currentUserId){
+      currentUserId = session.user.id;
+      document.getElementById('authGate').style.display = 'none';
+      document.getElementById('appMain').style.display = 'block';
+      document.getElementById('signOutBtn').style.display = 'inline';
+      load();
+    }else if(!session){
+      currentUserId = null;
+      document.getElementById('authGate').style.display = 'block';
+      document.getElementById('appMain').style.display = 'none';
+    }
+  });
 }
+
+if(cloudEnabled){
+  document.getElementById('authSignInBtn').addEventListener('click', async ()=>{
+    const email = document.getElementById('auth_email').value.trim();
+    const password = document.getElementById('auth_password').value;
+    document.getElementById('authError').textContent = '';
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if(error) document.getElementById('authError').textContent = error.message;
+  });
+  document.getElementById('signOutBtn').addEventListener('click', async ()=>{
+    await sb.auth.signOut();
+  });
+}
+
 
 function fmtDate(d){
   if(!d) return 'No date';
@@ -1455,7 +1575,7 @@ document.getElementById('importBtn').addEventListener('click', ()=> document.get
 document.getElementById('importInput').addEventListener('change', handleImportFile);
 document.getElementById('templateBtn').addEventListener('click', downloadTemplate);
 
-load();
+initAuthAndLoad();
 </script>
 </body>
 </html>
