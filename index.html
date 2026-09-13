@@ -439,6 +439,7 @@
     <button class="chip active" data-filter="all">All</button>
     <button class="chip" data-filter="favorite">♥ Favorites</button>
     <button class="chip" data-filter="issues">⚠ Has issues</button>
+    <button class="chip" id="moreFiltersBtn">🔍 Filters</button>
     <button class="chip" id="compareToggle">☐ Compare</button>
   </div>
   <div id="list"></div>
@@ -455,8 +456,8 @@
 // ---------- Cloud sync (Supabase) ----------
 // Fill these in after creating your free Supabase project (Project Settings → API).
 // Leave them as-is and the app works exactly as before, saving only to this device.
-const SUPABASE_URL = 'https://qimeicgwzozvqmwjhgjm.supabase.co';       // e.g. https://xxxxxxxx.supabase.co
-const SUPABASE_ANON_KEY = 'sb_publishable_M1I2jxka8I3ZTwn5_0Q_mA_n50HJbUv';
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';       // e.g. https://xxxxxxxx.supabase.co
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 function isSupabaseConfigured(){
   return SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 10;
@@ -478,6 +479,31 @@ let filterMode = 'all'; // all | favorite | issues
 let sortKey = 'date-desc';
 let compareMode = false;
 let compareSelected = new Set();
+
+const DEFAULT_ADV_FILTERS = {
+  suburb: '',
+  bedroomsMin: '',
+  bathroomsMin: '',
+  stationDistanceMax: '',
+  strataFeeBucket: 'any' // any | under1000 | under1500
+};
+let advFilters = Object.assign({}, DEFAULT_ADV_FILTERS);
+
+function advFiltersActiveCount(){
+  let n = 0;
+  if(advFilters.suburb) n++;
+  if(advFilters.bedroomsMin) n++;
+  if(advFilters.bathroomsMin) n++;
+  if(advFilters.stationDistanceMax) n++;
+  if(advFilters.strataFeeBucket && advFilters.strataFeeBucket !== 'any') n++;
+  return n;
+}
+
+function parseLeadingNumber(str){
+  if(!str) return null;
+  const m = String(str).match(/[\d.]+/);
+  return m ? parseFloat(m[0]) : null;
+}
 
 const DEFAULT_SETTINGS = {
   criteria: [
@@ -648,6 +674,7 @@ function starString(n){
 function roomSummary(r){
   const parts = [];
   if(r.bedrooms) parts.push(r.bedrooms + (r.bedrooms==1?' bed':' beds'));
+  if(r.bathrooms) parts.push(r.bathrooms + (r.bathrooms==1?' bath':' baths'));
   if(r.studyRooms) parts.push(r.studyRooms + (r.studyRooms==1?' study':' studies'));
   return parts.length ? parts.join(' · ') : 'Rooms not set';
 }
@@ -737,6 +764,34 @@ function extractBuildingName(address){
   return tokens[0].trim();
 }
 
+function extractSuburb(address){
+  if(!address) return '';
+  let s = String(address).trim();
+
+  const AU_STATES = ['NSW','VIC','QLD','WA','SA','TAS','ACT','NT'];
+  const stateRe = new RegExp('\\b(' + AU_STATES.join('|') + ')\\b', 'i');
+
+  let tokens = s.split(/[,，、]/).map(t=>t.trim()).filter(Boolean);
+
+  // Only trust a comma-segment as the suburb if it actually carries a state
+  // code or postcode signal — otherwise we risk grabbing a building name.
+  for(let i = tokens.length - 1; i >= 1; i--){
+    const t = tokens[i];
+    const hasState = stateRe.test(t);
+    const hasPostcode = /\b\d{4}\b/.test(t);
+    if(hasState || hasPostcode){
+      let cleaned = t.replace(/\d{4,6}\s*$/, '').replace(stateRe, '').replace(/[,.\-]+$/, '').trim();
+      if(cleaned) return cleaned;
+      return tokens[i-1].replace(/[,.\-]+$/, '').trim();
+    }
+  }
+
+  const cnMatch = s.match(/([^\d,，、]{2,8}?(区|县|镇|街道|新区))/);
+  if(cnMatch) return cnMatch[1];
+
+  return '';
+}
+
 function getFilteredSorted(){
   let out = records.filter(r=>{
     if(filterMode==='favorite' && !r.favorite) return false;
@@ -745,6 +800,17 @@ function getFilteredSorted(){
       const q = searchQuery.toLowerCase();
       const haystack = [r.address, r.buildingName, r.suburb, r.notes, r.pros, r.cons, r.viewingReview, r.qualityNotes, r.strataFee].join(' ').toLowerCase();
       if(!haystack.includes(q)) return false;
+    }
+    if(advFilters.suburb && (r.suburb||'').toLowerCase() !== advFilters.suburb.toLowerCase()) return false;
+    if(advFilters.bedroomsMin && !(parseFloat(r.bedrooms) >= parseFloat(advFilters.bedroomsMin))) return false;
+    if(advFilters.bathroomsMin && !(parseFloat(r.bathrooms) >= parseFloat(advFilters.bathroomsMin))) return false;
+    if(advFilters.stationDistanceMax && !(r.stationDistance !== '' && parseFloat(r.stationDistance) <= parseFloat(advFilters.stationDistanceMax))) return false;
+    if(advFilters.strataFeeBucket === 'under1000'){
+      const v = parseLeadingNumber(r.strataFee);
+      if(v === null || v >= 1000) return false;
+    }else if(advFilters.strataFeeBucket === 'under1500'){
+      const v = parseLeadingNumber(r.strataFee);
+      if(v === null || v >= 1500) return false;
     }
     return true;
   });
@@ -904,6 +970,10 @@ function renderDetail(r){
         <div class="detail-value">${r.bedrooms || '—'}</div>
       </div>
       <div class="detail-block">
+        <div class="detail-label">Bathrooms</div>
+        <div class="detail-value">${r.bathrooms || '—'}</div>
+      </div>
+      <div class="detail-block">
         <div class="detail-label">Study rooms</div>
         <div class="detail-value">${r.studyRooms || '—'}</div>
       </div>
@@ -939,6 +1009,10 @@ function renderDetail(r){
     <div class="detail-block">
       <div class="detail-label">Commute to ${escapeHtml(settings.commuteLabel||'destination')}</div>
       <div class="detail-value">${r.commuteMinutes ? r.commuteMinutes + ' min' : '—'}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Distance to station</div>
+      <div class="detail-value">${r.stationDistance ? r.stationDistance + ' km' : '—'}</div>
     </div>
     <div class="detail-block">
       <div class="detail-label">Viewing checklist</div>
@@ -988,7 +1062,7 @@ function renderDetail(r){
 }
 
 function openForm(existing){
-  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', priceHistory:[]};
+  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', priceHistory:[]};
   if(!r.scores) r.scores = {};
   if(!r.checklist) r.checklist = {};
   if(!r.priceHistory) r.priceHistory = [];
@@ -1011,7 +1085,10 @@ function openForm(existing){
     <div class="row2">
       <div class="field">
         <label>Suburb</label>
-        <input type="text" id="f_suburb" value="${escapeHtml(r.suburb||'')}" placeholder="e.g. Bondi">
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="f_suburb" value="${escapeHtml(r.suburb||'')}" placeholder="Auto-detected from address" style="flex:1;">
+          <button type="button" class="icon-btn" id="reguessSuburbBtn" title="Re-detect from address" style="border:1px solid var(--line);border-radius:8px;">↻</button>
+        </div>
       </div>
       <div class="field">
         <label>Year built</label>
@@ -1048,9 +1125,13 @@ function openForm(existing){
         <input type="number" min="0" id="f_bedrooms" value="${r.bedrooms||''}" placeholder="2">
       </div>
       <div class="field">
-        <label>Study rooms</label>
-        <input type="number" min="0" id="f_studyRooms" value="${r.studyRooms||''}" placeholder="1">
+        <label>Bathrooms</label>
+        <input type="number" min="0" step="0.5" id="f_bathrooms" value="${r.bathrooms||''}" placeholder="1">
       </div>
+    </div>
+    <div class="field">
+      <label>Study rooms</label>
+      <input type="number" min="0" id="f_studyRooms" value="${r.studyRooms||''}" placeholder="1">
     </div>
     <div class="subheading">Running costs</div>
     <div class="field">
@@ -1073,9 +1154,15 @@ function openForm(existing){
         ${[1,2,3,4,5].map(n=>`<span data-n="${n}" class="${n<=rating?'on':''}">★</span>`).join('')}
       </div>
     </div>
-    <div class="field">
-      <label>Commute to ${escapeHtml(settings.commuteLabel||'destination')} (min)</label>
-      <input type="number" min="0" id="f_commute" value="${r.commuteMinutes||''}" placeholder="30">
+    <div class="row2">
+      <div class="field">
+        <label>Commute to ${escapeHtml(settings.commuteLabel||'destination')} (min)</label>
+        <input type="number" min="0" id="f_commute" value="${r.commuteMinutes||''}" placeholder="30">
+      </div>
+      <div class="field">
+        <label>Distance to station (km)</label>
+        <input type="number" min="0" step="0.1" id="f_stationDistance" value="${r.stationDistance||''}" placeholder="0.8">
+      </div>
     </div>
     <div class="field">
       <label>Building quality issues</label>
@@ -1141,9 +1228,16 @@ function openForm(existing){
     if(!bField.value.trim()){
       bField.value = extractBuildingName(sheet.querySelector('#f_address').value);
     }
+    const subField = sheet.querySelector('#f_suburb');
+    if(!subField.value.trim()){
+      subField.value = extractSuburb(sheet.querySelector('#f_address').value);
+    }
   });
   sheet.querySelector('#reguessBtn').addEventListener('click', ()=>{
     sheet.querySelector('#f_buildingName').value = extractBuildingName(sheet.querySelector('#f_address').value);
+  });
+  sheet.querySelector('#reguessSuburbBtn').addEventListener('click', ()=>{
+    sheet.querySelector('#f_suburb').value = extractSuburb(sheet.querySelector('#f_address').value);
   });
   sheet.querySelector('#cancelBtn').addEventListener('click', closeOverlay);
   sheet.querySelector('#saveBtn').addEventListener('click', async ()=>{
@@ -1177,8 +1271,10 @@ function openForm(existing){
       councilRate: sheet.querySelector('#f_councilRate').value,
       waterRate: sheet.querySelector('#f_waterRate').value,
       bedrooms: sheet.querySelector('#f_bedrooms').value,
+      bathrooms: sheet.querySelector('#f_bathrooms').value,
       studyRooms: sheet.querySelector('#f_studyRooms').value,
       commuteMinutes: sheet.querySelector('#f_commute').value,
+      stationDistance: sheet.querySelector('#f_stationDistance').value,
       qualityIssues: sheet.querySelector('#f_qualityIssues').value,
       qualityNotes: sheet.querySelector('#f_qualityNotes').value.trim(),
       rating: rating,
@@ -1236,6 +1332,82 @@ document.getElementById('compareToggle').addEventListener('click', ()=>{
 
 document.getElementById('compareFab').addEventListener('click', ()=> openCompare());
 
+document.getElementById('moreFiltersBtn').addEventListener('click', ()=> openMoreFilters());
+
+function updateFiltersChipLabel(){
+  const n = advFiltersActiveCount();
+  const btn = document.getElementById('moreFiltersBtn');
+  btn.textContent = n ? `🔍 Filters (${n})` : '🔍 Filters';
+  btn.classList.toggle('active', n > 0);
+}
+
+function openMoreFilters(){
+  const sheet = document.getElementById('sheet');
+  const suburbs = Array.from(new Set(records.map(r=>r.suburb).filter(Boolean))).sort();
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>Filters</h2>
+    <div class="field">
+      <label>Suburb</label>
+      <select id="ff_suburb" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+        <option value="">Any suburb</option>
+        ${suburbs.map(s=>`<option value="${escapeHtml(s)}" ${advFilters.suburb===s?'selected':''}>${escapeHtml(s)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="row2">
+      <div class="field">
+        <label>Bedrooms (at least)</label>
+        <select id="ff_bedroomsMin" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+          <option value="">Any</option>
+          ${[1,2,3,4,5].map(n=>`<option value="${n}" ${String(advFilters.bedroomsMin)===String(n)?'selected':''}>${n}+</option>`).join('')}
+        </select>
+      </div>
+      <div class="field">
+        <label>Bathrooms (at least)</label>
+        <select id="ff_bathroomsMin" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+          <option value="">Any</option>
+          ${[1,2,3,4].map(n=>`<option value="${n}" ${String(advFilters.bathroomsMin)===String(n)?'selected':''}>${n}+</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label>Distance to station — within (km)</label>
+      <input type="number" min="0" step="0.1" id="ff_stationDistanceMax" value="${advFilters.stationDistanceMax||''}" placeholder="e.g. 1">
+    </div>
+    <div class="field">
+      <label>Strata fee</label>
+      <select id="ff_strataFeeBucket" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+        <option value="any" ${advFilters.strataFeeBucket==='any'?'selected':''}>Any</option>
+        <option value="under1000" ${advFilters.strataFeeBucket==='under1000'?'selected':''}>Under 1000</option>
+        <option value="under1500" ${advFilters.strataFeeBucket==='under1500'?'selected':''}>Under 1500</option>
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="filtersClearBtn">Clear filters</button>
+      <button class="btn btn-primary" id="filtersApplyBtn">Apply</button>
+    </div>
+  `;
+  sheet.querySelector('#filtersClearBtn').addEventListener('click', ()=>{
+    advFilters = Object.assign({}, DEFAULT_ADV_FILTERS);
+    updateFiltersChipLabel();
+    render();
+    closeOverlay();
+  });
+  sheet.querySelector('#filtersApplyBtn').addEventListener('click', ()=>{
+    advFilters = {
+      suburb: sheet.querySelector('#ff_suburb').value,
+      bedroomsMin: sheet.querySelector('#ff_bedroomsMin').value,
+      bathroomsMin: sheet.querySelector('#ff_bathroomsMin').value,
+      stationDistanceMax: sheet.querySelector('#ff_stationDistanceMax').value,
+      strataFeeBucket: sheet.querySelector('#ff_strataFeeBucket').value
+    };
+    updateFiltersChipLabel();
+    render();
+    closeOverlay();
+  });
+  openOverlay();
+}
+
 function openCompare(){
   const items = records.filter(r=> compareSelected.has(r.id));
   if(items.length<2) return;
@@ -1247,11 +1419,13 @@ function openCompare(){
     {label:'Price/sqm', fn: r=> pricePerSqmText(r) || '—'},
     {label:'Area', fn: r=> r.area ? r.area+' sqm' : '—'},
     {label:'Bedrooms', fn: r=> r.bedrooms || '—'},
+    {label:'Bathrooms', fn: r=> r.bathrooms || '—'},
     {label:'Study rooms', fn: r=> r.studyRooms || '—'},
     {label:'Strata fee', fn: r=> r.strataFee || '—'},
     {label:'Rental estimate', fn: r=> r.rentalEstimate ? '$'+r.rentalEstimate+'/wk' : '—'},
     {label:'Council', fn: r=> r.councilRate ? '$'+r.councilRate+'/qtr' : '—'},
     {label:'Water', fn: r=> r.waterRate ? '$'+r.waterRate+'/qtr' : '—'},
+    {label:'Distance to station', fn: r=> r.stationDistance ? r.stationDistance+' km' : '—'},
     {label:'Rating', fn: r=> starString(r.rating)},
     {label:'Quality issues', fn: r=> r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No' : 'Not noted')},
     {label:'Pros', fn: r=> escapeHtml(r.pros)||'—'},
@@ -1365,12 +1539,14 @@ function buildExportRows(){
     'Price/sqm': pricePerSqm(r) !== null ? pricePerSqm(r).toFixed(2) : '',
     'Area': r.area,
     'Bedrooms': r.bedrooms,
+    'Bathrooms': r.bathrooms,
     'Study Rooms': r.studyRooms,
     'Strata Fee': r.strataFee,
     'Rental Estimate ($/wk)': r.rentalEstimate,
     'Council ($/qtr)': r.councilRate,
     'Water ($/qtr)': r.waterRate,
     'Commute (min)': r.commuteMinutes,
+    'Distance to Station (km)': r.stationDistance,
     'Quality Issues': r.qualityIssues==='yes'?'Yes':(r.qualityIssues==='no'?'No':''),
     'Quality Notes': r.qualityNotes,
     'Rating': r.rating,
@@ -1424,12 +1600,14 @@ const FIELD_ALIASES = {
   price: ['price','totalprice','askingprice'],
   area: ['area','sqm','size','squaremeters','squarefeet'],
   bedrooms: ['bedrooms','beds','bedroom','br'],
+  bathrooms: ['bathrooms','baths','bathroom','ba'],
   studyRooms: ['studyrooms','study','den','studyroom'],
   strataFee: ['stratafee','strata','hoa','maintenancefee','managementfee'],
   rentalEstimate: ['rentalestimatewk','rentalestimate','rent','weeklyrent','rentwk','rentperweek'],
   councilRate: ['councilqtr','council','councilrate','councilrates'],
   waterRate: ['waterqtr','water','waterrate','waterrates'],
   commuteMinutes: ['commute','commutetime','commuteminutes','commutemins'],
+  stationDistance: ['distancetostationkm','distancetostation','stationdistance','distancetostationskm'],
   qualityIssues: ['qualityissues','qualityissue','issues'],
   qualityNotes: ['qualitynotes','issuedetails','defects','qualitydetails'],
   rating: ['rating','stars','score'],
@@ -1464,6 +1642,8 @@ function rowToRecord(row){
   const address = String(pick('address') || '').trim();
   let buildingName = String(pick('buildingName') || '').trim();
   if(!buildingName && address) buildingName = extractBuildingName(address);
+  let suburb = String(pick('suburb') || '').trim();
+  if(!suburb && address) suburb = extractSuburb(address);
 
   let dateVal = pick('date');
   let dateStr = '';
@@ -1497,19 +1677,21 @@ function rowToRecord(row){
     id: uid(),
     address,
     buildingName,
-    suburb: pick('suburb') !== '' ? String(pick('suburb')) : '',
+    suburb,
     yearBuilt: pick('yearBuilt') !== '' ? String(pick('yearBuilt')) : '',
     date: dateStr,
     priceMin: priceMin !== '' ? String(priceMin) : '',
     priceMax: priceMax !== '' ? String(priceMax) : '',
     area: pick('area') !== '' ? String(pick('area')) : '',
     bedrooms: pick('bedrooms') !== '' ? String(pick('bedrooms')) : '',
+    bathrooms: pick('bathrooms') !== '' ? String(pick('bathrooms')) : '',
     studyRooms: pick('studyRooms') !== '' ? String(pick('studyRooms')) : '',
     strataFee: pick('strataFee') !== '' ? String(pick('strataFee')) : '',
     rentalEstimate: pick('rentalEstimate') !== '' ? String(pick('rentalEstimate')) : '',
     councilRate: pick('councilRate') !== '' ? String(pick('councilRate')) : '',
     waterRate: pick('waterRate') !== '' ? String(pick('waterRate')) : '',
     commuteMinutes: pick('commuteMinutes') !== '' ? String(pick('commuteMinutes')) : '',
+    stationDistance: pick('stationDistance') !== '' ? String(pick('stationDistance')) : '',
     qualityIssues,
     qualityNotes: pick('qualityNotes') !== '' ? String(pick('qualityNotes')) : '',
     rating,
@@ -1529,7 +1711,26 @@ async function handleImportFile(e){
   if(!file) return;
   try{
     const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, {type:'array', cellDates:true});
+    const isCsv = /\.csv$/i.test(file.name);
+    let wb;
+    if(isCsv){
+      // CSV has no built-in encoding marker. Try UTF-8 first (with a BOM if present);
+      // if that looks invalid, fall back to GBK, which is the common encoding for
+      // CSVs exported from Chinese-locale Excel — otherwise Chinese text garbles.
+      let text;
+      try{
+        text = new TextDecoder('utf-8', {fatal:true}).decode(buf);
+      }catch(e){
+        try{
+          text = new TextDecoder('gbk').decode(buf);
+        }catch(e2){
+          text = new TextDecoder('utf-8').decode(buf);
+        }
+      }
+      wb = XLSX.read(text, {type:'string', cellDates:true});
+    }else{
+      wb = XLSX.read(buf, {type:'array', cellDates:true});
+    }
     const sheetName = wb.SheetNames[0];
     const ws = wb.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(ws, {defval:''});
@@ -1556,11 +1757,14 @@ async function handleImportFile(e){
 }
 
 function downloadTemplate(){
-  const headers = ['Address','Building','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
-  const example = ['303/71 Ridge Street','71 Ridge Street','North Sydney','1998','2026-03-15','260','300','88','2','1','350/month','650','450','180','25','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
+  const headers = ['Address','Building','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Bathrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Distance to Station (km)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
+  const example = ['303/71 Ridge Street','71 Ridge Street','North Sydney','1998','2026-03-15','260','300','88','2','1','1','350/month','650','450','180','25','0.8','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = headers.map(esc).join(',') + '\n' + example.map(esc).join(',');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  // Prepend a UTF-8 BOM so Excel (especially non-English locales) detects the
+  // encoding correctly instead of guessing the system codepage and garbling
+  // any non-ASCII text (e.g. Chinese) in the file.
+  const blob = new Blob(['\uFEFF' + csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
