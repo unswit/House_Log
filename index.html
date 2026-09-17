@@ -414,6 +414,7 @@
     </div>
   </header>
   <div class="toolbar">
+    <button class="tool-btn" id="pasteListingBtn">📋 Paste listing</button>
     <button class="tool-btn" id="importBtn">Import from Excel</button>
     <button class="tool-btn" id="templateBtn">Download template</button>
     <button class="tool-btn" id="exportExcelBtn">Export to Excel</button>
@@ -753,15 +754,24 @@ function extractBuildingName(address){
   tokens = tokens.filter(t=> !/^[\d\-\/\s]+$/.test(t));
   if(tokens.length===0) return '';
 
+  // a token that's really just "Suburb STATE 2000" is location info, not a
+  // building/complex name — exclude those before picking a fallback
+  const AU_STATES = ['NSW','VIC','QLD','WA','SA','TAS','ACT','NT'];
+  const stateRe = new RegExp('\\b(' + AU_STATES.join('|') + ')\\b', 'i');
+  const isLocationOnly = t => stateRe.test(t) || /\b\d{4}\b/.test(t);
+  const nameTokens = tokens.filter(t=> !isLocationOnly(t));
+
   // prefer a token that contains a recognizable community/building suffix
   const suffixes = ['小区','花园','苑','公寓','大厦','广场','城','庄园','府','公馆','名邸','新村','里','坊','庭','轩','阁','湾','郡',
     'court','residence','residences','tower','towers','gardens','plaza','heights','park','villas','apartments','estate','manor'];
-  let withSuffix = tokens.find(t=> suffixes.some(suf=> t.toLowerCase().includes(suf.toLowerCase())));
+  let withSuffix = nameTokens.find(t=> suffixes.some(suf=> t.toLowerCase().includes(suf.toLowerCase())));
   if(withSuffix) return withSuffix.trim();
 
-  // otherwise fall back to the longest remaining token (usually the descriptive name)
-  tokens.sort((a,b)=> b.length - a.length);
-  return tokens[0].trim();
+  if(nameTokens.length===0) return '';
+
+  // otherwise fall back to the longest remaining non-location token
+  nameTokens.sort((a,b)=> b.length - a.length);
+  return nameTokens[0].trim();
 }
 
 function extractSuburb(address){
@@ -790,6 +800,58 @@ function extractSuburb(address){
   if(cnMatch) return cnMatch[1];
 
   return '';
+}
+
+// ---------- Paste-from-listing parser ----------
+
+function parseListingText(text){
+  const draft = {};
+  if(!text) return draft;
+
+  const urlMatch = text.match(/https?:\/\/[^\s)"'<>]+/i);
+  if(urlMatch) draft.listingUrl = urlMatch[0];
+
+  const priceRangeMatch = text.match(/\$\s*([\d,]+)(?:\.\d+)?\s*(?:-|–|to)\s*\$?\s*([\d,]+)(?:\.\d+)?/i);
+  if(priceRangeMatch){
+    draft.priceMin = String(Math.round(parseInt(priceRangeMatch[1].replace(/,/g,''),10)/1000));
+    draft.priceMax = String(Math.round(parseInt(priceRangeMatch[2].replace(/,/g,''),10)/1000));
+  }else{
+    const priceMatch = text.match(/\$\s*([\d,]{4,})(?:\.\d+)?/);
+    if(priceMatch){
+      const v = String(Math.round(parseInt(priceMatch[1].replace(/,/g,''),10)/1000));
+      draft.priceMin = v;
+      draft.priceMax = v;
+    }
+  }
+
+  const bedMatch = text.match(/(\d+)\s*(?:bed(?:room)?s?)\b/i);
+  if(bedMatch) draft.bedrooms = bedMatch[1];
+  const bathMatch = text.match(/(\d+)\s*(?:bath(?:room)?s?)\b/i);
+  if(bathMatch) draft.bathrooms = bathMatch[1];
+  const studyMatch = text.match(/(\d+)\s*(?:study|studies|home\s*office)\b/i);
+  if(studyMatch) draft.studyRooms = studyMatch[1];
+
+  const areaMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:m²|m2|sqm|sq\s*m)\b/i);
+  if(areaMatch) draft.area = areaMatch[1];
+
+  const yearMatch = text.match(/\bbuilt\D{0,10}(19|20)\d{2}\b/i) || text.match(/\b((?:19|20)\d{2})\b.{0,15}built/i);
+  if(yearMatch){
+    const y = yearMatch[0].match(/(19|20)\d{2}/);
+    if(y) draft.yearBuilt = y[0];
+  }
+
+  const stripLine = l => l.replace(/https?:\/\/\S+/gi, '').trim();
+  const lines = text.split(/\n/).map(l=>stripLine(l)).filter(Boolean);
+  const addressLine = lines.find(l => /\d/.test(l) && l.length < 120 && !/^\$/.test(l));
+  if(addressLine){
+    draft.address = addressLine;
+    draft.buildingName = extractBuildingName(addressLine);
+    draft.suburb = extractSuburb(addressLine);
+  }
+
+  draft.notes = 'Pasted listing:\n' + text.trim();
+
+  return draft;
 }
 
 function getFilteredSorted(){
@@ -936,6 +998,7 @@ function renderDetail(r){
     <div class="sheet-handle"></div>
     <h2>${escapeHtml(r.buildingName || r.address || 'Unnamed property')}</h2>
     ${r.buildingName ? `<div class="detail-block"><div class="detail-label">Full address</div><div class="detail-value">${escapeHtml(r.address)}</div></div>` : ''}
+    ${r.listingUrl ? `<div class="detail-block"><div class="detail-label">Listing</div><div class="detail-value"><a href="${escapeHtml(r.listingUrl)}" target="_blank" rel="noopener" style="color:var(--accent);">View original listing ↗</a></div></div>` : ''}
     <div class="row3">
       <div class="detail-block">
         <div class="detail-label">Suburb</div>
@@ -1062,7 +1125,7 @@ function renderDetail(r){
 }
 
 function openForm(existing){
-  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', priceHistory:[]};
+  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
   if(!r.scores) r.scores = {};
   if(!r.checklist) r.checklist = {};
   if(!r.priceHistory) r.priceHistory = [];
@@ -1094,6 +1157,10 @@ function openForm(existing){
         <label>Year built</label>
         <input type="number" id="f_yearBuilt" value="${r.yearBuilt||''}" placeholder="1998">
       </div>
+    </div>
+    <div class="field">
+      <label>Listing URL</label>
+      <input type="url" id="f_listingUrl" value="${escapeHtml(r.listingUrl||'')}" placeholder="https://www.realestate.com.au/...">
     </div>
     <div class="field">
       <label>Viewing date</label>
@@ -1261,6 +1328,7 @@ function openForm(existing){
       address: sheet.querySelector('#f_address').value.trim(),
       buildingName: sheet.querySelector('#f_buildingName').value.trim(),
       suburb: sheet.querySelector('#f_suburb').value.trim(),
+      listingUrl: sheet.querySelector('#f_listingUrl').value.trim(),
       yearBuilt: sheet.querySelector('#f_yearBuilt').value,
       date: sheet.querySelector('#f_date').value,
       priceMin: newPriceMin,
@@ -1333,6 +1401,33 @@ document.getElementById('compareToggle').addEventListener('click', ()=>{
 document.getElementById('compareFab').addEventListener('click', ()=> openCompare());
 
 document.getElementById('moreFiltersBtn').addEventListener('click', ()=> openMoreFilters());
+
+document.getElementById('pasteListingBtn').addEventListener('click', ()=> openPasteListing());
+
+function openPasteListing(){
+  const sheet = document.getElementById('sheet');
+  sheet.innerHTML = `
+    <div class="sheet-handle"></div>
+    <h2>Paste from listing</h2>
+    <p style="color:var(--ink-soft);font-size:13px;margin-top:-8px;">Copy the listing text (and its link) from realestate.com.au, Domain, or anywhere else, then paste it below. We'll try to pull out the address, price, beds/baths and link automatically — you can fix anything before saving.</p>
+    <div class="field">
+      <textarea id="pasteText" style="min-height:200px;" placeholder="Paste copied listing text here…"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" id="pasteCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="pasteParseBtn">Parse &amp; continue</button>
+    </div>
+  `;
+  sheet.querySelector('#pasteCancelBtn').addEventListener('click', closeOverlay);
+  sheet.querySelector('#pasteParseBtn').addEventListener('click', ()=>{
+    const text = sheet.querySelector('#pasteText').value;
+    if(!text.trim()){ alert('Paste some listing text first.'); return; }
+    const draft = parseListingText(text);
+    const base = {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
+    openForm(Object.assign(base, draft));
+  });
+  openOverlay();
+}
 
 function updateFiltersChipLabel(){
   const n = advFiltersActiveCount();
@@ -1531,6 +1626,7 @@ function buildExportRows(){
   return getFilteredSorted().map(r=>({
     'Address': r.address,
     'Building': r.buildingName,
+    'Listing URL': r.listingUrl,
     'Suburb': r.suburb,
     'Year Built': r.yearBuilt,
     'Date': r.date,
@@ -1592,6 +1688,7 @@ document.getElementById('exportPdfBtn').addEventListener('click', exportToPdf);
 const FIELD_ALIASES = {
   address: ['address','property','propertyaddress','name','building','apartment','unit'],
   buildingName: ['buildingname','building','community','complex','communityname','propertyname','estate'],
+  listingUrl: ['listingurl','url','link','listinglink'],
   suburb: ['suburb','district','area2','neighbourhood','neighborhood'],
   yearBuilt: ['yearbuilt','builtyear','constructionyear','year'],
   date: ['date','viewingdate','visitdate'],
@@ -1677,6 +1774,7 @@ function rowToRecord(row){
     id: uid(),
     address,
     buildingName,
+    listingUrl: pick('listingUrl') !== '' ? String(pick('listingUrl')) : '',
     suburb,
     yearBuilt: pick('yearBuilt') !== '' ? String(pick('yearBuilt')) : '',
     date: dateStr,
@@ -1757,8 +1855,8 @@ async function handleImportFile(e){
 }
 
 function downloadTemplate(){
-  const headers = ['Address','Building','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Bathrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Distance to Station (km)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
-  const example = ['303/71 Ridge Street','71 Ridge Street','North Sydney','1998','2026-03-15','260','300','88','2','1','1','350/month','650','450','180','25','0.8','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
+  const headers = ['Address','Building','Listing URL','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Bathrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Distance to Station (km)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
+  const example = ['303/71 Ridge Street','71 Ridge Street','https://www.realestate.com.au/property-...','North Sydney','1998','2026-03-15','260','300','88','2','1','1','350/month','650','450','180','25','0.8','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = headers.map(esc).join(',') + '\n' + example.map(esc).join(',');
   // Prepend a UTF-8 BOM so Excel (especially non-English locales) detects the
