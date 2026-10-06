@@ -8,30 +8,31 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="House Log">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#F6F4EE">
+<meta name="theme-color" content="#FFFFFF">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root{
-    --paper:#F6F4EE;
-    --paper-raised:#FBFAF5;
-    --ink:#24303A;
-    --ink-soft:#6B7680;
-    --line:#DCD7C9;
-    --accent:#3B6E71;
-    --accent-dim:#EBF1F0;
-    --warm:#B8874A;
-    --good:#52734F;
-    --concern:#9C4A3C;
+    --paper:#FFFFFF;
+    --paper-raised:#FFFFFF;
+    --surface:#F6F6F6;
+    --ink:#000000;
+    --ink-soft:#6B6B6B;
+    --line:#E7E7E7;
+    --accent:#276EF1;
+    --accent-dim:#EAF1FE;
+    --warm:#FFC043;
+    --good:#05A357;
+    --concern:#E11900;
   }
   *{box-sizing:border-box;}
   body{
     margin:0;
     background:var(--paper);
     color:var(--ink);
-    font-family:'IBM Plex Sans',-apple-system,sans-serif;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
     -webkit-font-smoothing:antialiased;
   }
   .app{
@@ -39,91 +40,95 @@
     margin:0 auto;
     min-height:100vh;
     position:relative;
-    padding-bottom:100px;
+    padding-bottom:110px;
   }
   header{
-    padding:28px 20px 16px;
-    border-bottom:1px solid var(--line);
+    padding:28px 20px 18px;
     display:flex;
     justify-content:space-between;
     align-items:baseline;
   }
   header h1{
-    font-family:'Fraunces',serif;
-    font-weight:600;
-    font-size:24px;
+    font-family:'Inter',sans-serif;
+    font-weight:800;
+    font-size:26px;
     margin:0;
-    letter-spacing:-0.01em;
+    letter-spacing:-0.02em;
   }
   header .count{
     font-size:13px;
+    font-weight:600;
     color:var(--ink-soft);
     white-space:nowrap;
   }
   .toolbar{
-    padding:12px 20px 0;
+    padding:6px 20px 4px;
     display:flex;
-    gap:14px;
+    gap:10px;
     flex-wrap:wrap;
-    row-gap:6px;
+    row-gap:8px;
   }
   .tool-btn{
-    background:none;
+    background:var(--surface);
     border:none;
-    padding:0;
-    color:var(--accent);
+    padding:9px 14px;
+    border-radius:20px;
+    color:var(--ink);
     font-family:inherit;
     font-size:12.5px;
+    font-weight:600;
     cursor:pointer;
-    text-decoration:underline;
-    text-underline-offset:2px;
+    text-decoration:none;
   }
   .tool-btn:active{opacity:0.6;}
   .searchbar{
-    padding:12px 20px 0;
+    padding:14px 20px 0;
     display:flex;
     gap:8px;
   }
   .searchbar input[type=text]{
     flex:1;
-    padding:9px 12px;
-    border:1px solid var(--line);
-    border-radius:8px;
-    background:#fff;
+    padding:13px 16px;
+    border:none;
+    border-radius:26px;
+    background:var(--surface);
     font-family:inherit;
     font-size:14px;
+    font-weight:500;
     color:var(--ink);
   }
+  .searchbar input[type=text]::placeholder{color:var(--ink-soft);}
   .searchbar select{
-    padding:9px 8px;
-    border:1px solid var(--line);
-    border-radius:8px;
-    background:#fff;
+    padding:9px 10px;
+    border:none;
+    border-radius:20px;
+    background:var(--surface);
     font-family:inherit;
     font-size:12.5px;
+    font-weight:600;
     color:var(--ink);
-    max-width:130px;
+    max-width:132px;
   }
   .chipbar{
-    padding:10px 20px 0;
+    padding:12px 20px 0;
     display:flex;
     gap:8px;
     flex-wrap:wrap;
   }
   .chip{
-    padding:6px 12px;
+    padding:8px 14px;
     border-radius:999px;
-    border:1px solid var(--line);
-    background:#fff;
-    color:var(--ink-soft);
+    border:none;
+    background:var(--surface);
+    color:var(--ink);
     font-family:inherit;
     font-size:12.5px;
+    font-weight:600;
     cursor:pointer;
   }
   .chip.active{
     background:var(--ink);
-    border-color:var(--ink);
-    color:var(--paper);
+    color:#fff;
   }
   .chip:active{opacity:0.7;}
   .row-check{
@@ -131,22 +136,22 @@
     padding-top:3px;
     flex-shrink:0;
   }
-  .row-check input{width:18px;height:18px;}
+  .row-check input{width:20px;height:20px;accent-color:var(--ink);}
   .compare-fab{
     position:fixed;
     bottom:28px;
     left:calc(50% - 240px + 20px);
     right:auto;
-    padding:0 20px;
-    height:48px;
-    border-radius:24px;
-    background:var(--accent);
+    padding:0 22px;
+    height:52px;
+    border-radius:26px;
+    background:var(--ink);
     color:#fff;
     border:none;
     font-size:14px;
-    font-weight:600;
+    font-weight:700;
     font-family:inherit;
-    box-shadow:0 6px 16px rgba(36,48,58,0.28);
+    box-shadow:0 8px 20px rgba(0,0,0,0.22);
     cursor:pointer;
     display:none;
   }
@@ -158,16 +163,16 @@
   .compare-table{border-collapse:collapse;width:100%;min-width:480px;}
   .compare-table th, .compare-table td{
     border-bottom:1px solid var(--line);
-    padding:9px 10px;
+    padding:11px 10px;
     font-size:13px;
     text-align:left;
     vertical-align:top;
     min-width:130px;
   }
   .compare-table th{
-    font-family:'Fraunces',serif;
+    font-family:'Inter',sans-serif;
     font-size:14px;
-    font-weight:600;
+    font-weight:800;
     position:sticky;
     top:0;
     background:var(--paper-raised);
@@ -178,31 +183,35 @@
     background:var(--paper-raised);
     color:var(--ink-soft);
     font-size:12px;
+    font-weight:600;
     min-width:96px;
-    z-index:1;
+    z-index:2;
+    box-shadow:2px 0 4px -2px rgba(0,0,0,0.12);
   }
-  #list{padding:4px 20px 0;}
+  #list{padding:6px 20px 0;}
   .row{
-    padding:16px 0;
+    padding:18px 0;
     border-bottom:1px solid var(--line);
     display:flex;
     justify-content:space-between;
     align-items:flex-start;
     cursor:pointer;
   }
-  .row:active{opacity:0.6;}
+  .row:active{opacity:0.55;}
   .row-main{flex:1;min-width:0;}
   .row-address{
-    font-family:'Fraunces',serif;
-    font-size:18px;
-    font-weight:600;
+    font-family:'Inter',sans-serif;
+    font-size:17px;
+    font-weight:700;
     margin:0 0 4px;
     overflow:hidden;
     text-overflow:ellipsis;
     white-space:nowrap;
+    letter-spacing:-0.01em;
   }
   .row-meta{
     font-size:13px;
+    font-weight:500;
     color:var(--ink-soft);
   }
   .row-side{
@@ -211,7 +220,7 @@
     flex-shrink:0;
   }
   .stars{font-size:13px;color:var(--warm);letter-spacing:1px;}
-  .row-date{font-size:12px;color:var(--ink-soft);margin-top:6px;}
+  .row-date{font-size:12px;font-weight:600;color:var(--ink-soft);margin-top:6px;}
   .fav-mark{color:var(--concern);font-size:15px;margin-right:4px;}
 
   .empty{
@@ -221,26 +230,27 @@
   }
   .empty p{font-size:14px;line-height:1.7;margin:0;}
   .empty .big{
-    font-family:'Fraunces',serif;
-    font-size:19px;
+    font-family:'Inter',sans-serif;
+    font-size:20px;
     color:var(--ink);
     margin-bottom:10px;
-    font-weight:600;
+    font-weight:800;
+    letter-spacing:-0.01em;
   }
 
   .fab{
     position:fixed;
     bottom:28px;
     right:calc(50% - 240px + 20px);
-    width:56px;height:56px;
-    border-radius:50%;
+    width:58px;height:58px;
+    border-radius:18px;
     background:var(--ink);
-    color:var(--paper);
+    color:#fff;
     border:none;
-    font-size:26px;
-    line-height:56px;
+    font-size:28px;
+    line-height:58px;
     text-align:center;
-    box-shadow:0 6px 16px rgba(36,48,58,0.28);
+    box-shadow:0 8px 20px rgba(0,0,0,0.28);
     cursor:pointer;
   }
   @media (max-width:520px){
@@ -250,7 +260,7 @@
 
   .sheet-overlay{
     position:fixed;inset:0;
-    background:rgba(36,48,58,0.35);
+    background:rgba(0,0,0,0.45);
     display:none;
     z-index:10;
   }
@@ -261,38 +271,40 @@
     max-width:480px;
     margin:0 auto;
     background:var(--paper-raised);
-    border-radius:18px 18px 0 0;
+    border-radius:24px 24px 0 0;
     max-height:92vh;
     overflow-y:auto;
-    padding:20px 20px 32px;
+    padding:22px 20px 32px;
     transform:translateY(100%);
     transition:transform 0.28s ease;
     z-index:11;
   }
   .sheet.open{transform:translateY(0);}
   .sheet-handle{
-    width:36px;height:4px;background:var(--line);
-    border-radius:2px;margin:0 auto 18px;
+    width:36px;height:5px;background:var(--line);
+    border-radius:3px;margin:0 auto 20px;
   }
   .sheet h2{
-    font-family:'Fraunces',serif;
-    font-size:21px;
+    font-family:'Inter',sans-serif;
+    font-size:22px;
     margin:0 0 18px;
-    font-weight:700;
+    font-weight:800;
+    letter-spacing:-0.01em;
   }
   .field{margin-bottom:14px;}
   .field label{
     display:block;
     font-size:12px;
+    font-weight:600;
     color:var(--ink-soft);
     margin-bottom:5px;
   }
   .field input, .field textarea{
     width:100%;
-    padding:10px 12px;
+    padding:12px 14px;
     border:1px solid var(--line);
-    border-radius:8px;
-    background:#fff;
+    border-radius:10px;
+    background:var(--surface);
     font-family:inherit;
     font-size:15px;
     color:var(--ink);
@@ -302,28 +314,28 @@
   .row2 .field{flex:1;}
   .row3{display:flex;gap:10px;}
   .row3 .field{flex:1;}
-  .star-picker{display:flex;gap:8px;font-size:26px;color:var(--line);}
+  .star-picker{display:flex;gap:8px;font-size:28px;color:var(--line);}
   .star-picker span{cursor:pointer;}
   .star-picker span.on{color:var(--warm);}
   .btn-row{display:flex;gap:10px;margin-top:20px;}
   .btn{
     flex:1;
-    padding:13px;
-    border-radius:9px;
+    padding:15px;
+    border-radius:12px;
     border:none;
     font-size:15px;
-    font-weight:600;
+    font-weight:700;
     cursor:pointer;
     font-family:inherit;
   }
-  .btn-primary{background:var(--ink);color:var(--paper);}
-  .btn-secondary{background:transparent;color:var(--ink-soft);border:1px solid var(--line);}
-  .btn-danger{background:transparent;color:var(--concern);border:1px solid var(--concern);}
+  .btn-primary{background:var(--ink);color:#fff;}
+  .btn-secondary{background:var(--surface);color:var(--ink);border:none;}
+  .btn-danger{background:#fff;color:var(--concern);border:1px solid var(--concern);}
   .btn:active{opacity:0.7;}
 
   .detail-block{margin-bottom:16px;}
-  .detail-label{font-size:12px;color:var(--ink-soft);margin-bottom:3px;}
-  .detail-value{font-size:15px;line-height:1.6;white-space:pre-wrap;}
+  .detail-label{font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:3px;}
+  .detail-value{font-size:15px;font-weight:500;line-height:1.6;white-space:pre-wrap;}
   .tag-good{color:var(--good);}
   .tag-concern{color:var(--concern);}
   .loading{padding:60px 20px;text-align:center;color:var(--ink-soft);font-size:14px;}
@@ -331,7 +343,7 @@
   .score-badge{
     display:inline-block;
     font-size:12px;
-    font-weight:600;
+    font-weight:700;
     color:var(--accent);
     margin-top:2px;
   }
@@ -341,40 +353,42 @@
     gap:8px;
     margin-bottom:8px;
   }
-  .crit-row .crit-name{flex:1;font-size:14px;}
+  .crit-row .crit-name{flex:1;font-size:14px;font-weight:500;}
   .crit-row select, .crit-row input[type=number]{
-    padding:7px 8px;
+    padding:8px 10px;
     border:1px solid var(--line);
-    border-radius:7px;
-    background:#fff;
+    border-radius:8px;
+    background:var(--surface);
     font-family:inherit;
     font-size:13px;
   }
   .crit-row .crit-weight{width:56px;}
   .crit-row .crit-score{width:64px;}
   .icon-btn{
-    background:none;border:none;color:var(--ink-soft);
-    font-size:16px;cursor:pointer;padding:2px 6px;
+    background:var(--surface);border:none;color:var(--ink);
+    font-size:16px;cursor:pointer;padding:6px 10px;border-radius:8px;
   }
-  .checklist-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;}
-  .checklist-row input[type=checkbox]{width:18px;height:18px;flex-shrink:0;}
+  .checklist-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:14px;font-weight:500;}
+  .checklist-row input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:var(--ink);}
   .checklist-row input[type=text]{flex:1;}
   .subheading{
-    font-family:'Fraunces',serif;
+    font-family:'Inter',sans-serif;
     font-size:15px;
-    font-weight:600;
-    margin:20px 0 10px;
+    font-weight:800;
+    margin:22px 0 10px;
+    letter-spacing:-0.01em;
   }
   .price-history-item{
     font-size:13px;
+    font-weight:500;
     color:var(--ink-soft);
-    padding:4px 0;
-    border-bottom:1px dashed var(--line);
+    padding:6px 0;
+    border-bottom:1px solid var(--line);
   }
   .add-mini-btn{
-    background:none;border:1px dashed var(--line);border-radius:7px;
-    color:var(--accent);font-family:inherit;font-size:12.5px;
-    padding:6px 10px;cursor:pointer;margin-top:4px;
+    background:var(--surface);border:none;border-radius:10px;
+    color:var(--ink);font-family:inherit;font-size:12.5px;font-weight:700;
+    padding:8px 12px;cursor:pointer;margin-top:4px;
   }
   #printArea{display:none;}
   @media print{
@@ -396,7 +410,7 @@
 <body>
 <div class="app">
   <div id="authGate" style="display:none;padding:60px 4px 0;">
-    <h1 style="font-family:'Fraunces',serif;font-size:24px;margin:0 0 4px;">House Viewing Log</h1>
+    <h1 style="font-family:'Inter',sans-serif;font-weight:800;letter-spacing:-0.02em;font-size:26px;margin:0 0 4px;">House Viewing Log</h1>
     <p style="color:var(--ink-soft);font-size:14px;margin:0 0 24px;">Sign in to sync your data across devices.</p>
     <div class="field"><label>Email</label><input type="email" id="auth_email"></div>
     <div class="field"><label>Password</label><input type="password" id="auth_password"></div>
@@ -457,8 +471,8 @@
 // ---------- Cloud sync (Supabase) ----------
 // Fill these in after creating your free Supabase project (Project Settings → API).
 // Leave them as-is and the app works exactly as before, saving only to this device.
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';       // e.g. https://xxxxxxxx.supabase.co
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://qimeicgwzozvqmwjhgjm.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_M1I2jxka8I3ZTwn5_0Q_mA_n50HJbUv';
 
 function isSupabaseConfigured(){
   return SUPABASE_URL.startsWith('http') && SUPABASE_ANON_KEY.length > 10;
