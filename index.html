@@ -11,6 +11,8 @@
 <meta name="theme-color" content="#FFFFFF">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
@@ -131,6 +133,40 @@
     color:#fff;
   }
   .chip:active{opacity:0.7;}
+  .tabbar{
+    display:flex;
+    gap:4px;
+    margin:4px 20px 0;
+    padding:4px;
+    background:var(--surface);
+    border-radius:14px;
+  }
+  .tab{
+    flex:1;
+    border:none;
+    background:transparent;
+    padding:11px 8px;
+    border-radius:11px;
+    font-family:inherit;
+    font-size:14px;
+    font-weight:700;
+    color:var(--ink-soft);
+    cursor:pointer;
+  }
+  .tab.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,0.14);}
+  .tab .tab-count{font-weight:600;color:var(--ink-soft);margin-left:4px;}
+  .status-pill{
+    display:inline-block;
+    padding:4px 10px;
+    border-radius:999px;
+    background:var(--accent-dim);
+    color:var(--accent);
+    font-size:11.5px;
+    font-weight:700;
+    margin-bottom:14px;
+  }
+  .status-pill.viewed{background:var(--surface);color:var(--ink-soft);}
+  .btn-wide{width:100%;margin-top:20px;}
   .row-check{
     padding-right:12px;
     padding-top:3px;
@@ -405,6 +441,25 @@
     }
     #printArea h1{font-size:18px;margin-bottom:12px;}
   }
+
+  /* ---- Map view ---- */
+  .viewbar{display:flex;gap:4px;margin:10px 20px 0;padding:4px;background:var(--surface);border-radius:14px;}
+  .viewbar .tab{font-size:13px;}
+  #mapWrap{margin:12px 20px 0;display:none;}
+  #mapNote{font-size:13px;color:var(--ink-soft);margin-bottom:8px;display:none;}
+  #mapNote .chip{margin:4px 6px 0 0;}
+  #map{position:relative;z-index:0;isolation:isolate;height:calc(100vh - 330px);min-height:380px;border-radius:18px;overflow:hidden;background:var(--surface);}
+  .map-msg{padding:40px 20px;text-align:center;color:var(--ink-soft);font-size:14px;}
+  .house-dot{background:#E11900;border:3px solid #fff;border-radius:50%;box-shadow:0 1px 5px rgba(0,0,0,.45);}
+  .house-dot.approx{opacity:.55;}
+  .placing-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--ink);color:#fff;border-radius:14px;padding:10px 14px;font-size:13px;margin-bottom:8px;}
+  .placing-banner button{background:#fff;color:var(--ink);border:none;border-radius:10px;padding:6px 12px;font-weight:600;cursor:pointer;}
+  @media (min-width:900px){
+    .app{max-width:1000px;}
+    .sheet{max-width:760px;}
+    .fab{right:calc(50% - 500px + 20px);}
+    #map{height:calc(100vh - 300px);}
+  }
 </style>
 </head>
 <body>
@@ -427,6 +482,14 @@
       <div id="syncStatus" style="font-size:11px;color:var(--ink-soft);"></div>
     </div>
   </header>
+  <div class="tabbar">
+    <button class="tab" id="tabWishlist" data-tab="wishlist">Want to see<span class="tab-count"></span></button>
+    <button class="tab active" id="tabViewed" data-tab="viewed">Viewed<span class="tab-count"></span></button>
+  </div>
+  <div class="viewbar">
+    <button class="tab active" id="viewMap" data-view="map">🗺 Map</button>
+    <button class="tab" id="viewList" data-view="list">☰ List</button>
+  </div>
   <div class="toolbar">
     <button class="tool-btn" id="pasteListingBtn">📋 Paste listing</button>
     <button class="tool-btn" id="importBtn">Import from Excel</button>
@@ -457,6 +520,7 @@
     <button class="chip" id="moreFiltersBtn">🔍 Filters</button>
     <button class="chip" id="compareToggle">☐ Compare</button>
   </div>
+  <div id="mapWrap"><div id="placingBar"></div><div id="mapNote"></div><div id="map"></div></div>
   <div id="list"></div>
   <button class="fab" id="addBtn">＋</button>
   <button class="compare-fab" id="compareFab">Compare (0)</button>
@@ -494,6 +558,11 @@ let filterMode = 'all'; // all | favorite | issues
 let sortKey = 'date-desc';
 let compareMode = false;
 let compareSelected = new Set();
+let viewTab = 'viewed'; // 'wishlist' (want to see) | 'viewed'
+
+// Records saved before this feature existed have no status — they were all
+// viewed properties, so treat a missing status as 'viewed'.
+function getStatus(r){ return r && r.status === 'wishlist' ? 'wishlist' : 'viewed'; }
 
 const DEFAULT_ADV_FILTERS = {
   suburb: '',
@@ -868,13 +937,14 @@ function parseListingText(text){
   return draft;
 }
 
-function getFilteredSorted(){
+function getFilteredSorted(allTabs){
   let out = records.filter(r=>{
+    if(!allTabs && getStatus(r) !== viewTab) return false;
     if(filterMode==='favorite' && !r.favorite) return false;
     if(filterMode==='issues' && r.qualityIssues!=='yes') return false;
     if(searchQuery){
       const q = searchQuery.toLowerCase();
-      const haystack = [r.address, r.buildingName, r.suburb, r.notes, r.pros, r.cons, r.viewingReview, r.qualityNotes, r.strataFee].join(' ').toLowerCase();
+      const haystack = [r.address, r.buildingName, r.suburb, r.notes, r.pros, r.cons, r.viewingReview, r.qualityNotes, r.noiseLevel, r.noiseNotes, r.strataFee].join(' ').toLowerCase();
       if(!haystack.includes(q)) return false;
     }
     if(advFilters.suburb && (r.suburb||'').toLowerCase() !== advFilters.suburb.toLowerCase()) return false;
@@ -907,16 +977,34 @@ function getFilteredSorted(){
 }
 
 function render(){
+  renderList();
+  applyViewMode();
+  if(viewMode==='map') renderMap();
+}
+
+function renderList(){
   const list = document.getElementById('list');
   const filtered = getFilteredSorted();
-  document.getElementById('count').textContent = records.length
-    ? (filtered.length===records.length ? `${records.length} propert${records.length===1?'y':'ies'}` : `${filtered.length} of ${records.length}`)
+  const tabRecords = records.filter(r=> getStatus(r) === viewTab);
+  const wishCount = records.filter(r=> getStatus(r) === 'wishlist').length;
+  const viewedCount = records.length - wishCount;
+  document.querySelector('#tabWishlist .tab-count').textContent = wishCount;
+  document.querySelector('#tabViewed .tab-count').textContent = viewedCount;
+  document.getElementById('tabWishlist').classList.toggle('active', viewTab==='wishlist');
+  document.getElementById('tabViewed').classList.toggle('active', viewTab==='viewed');
+  document.getElementById('count').textContent = tabRecords.length
+    ? (filtered.length===tabRecords.length ? `${tabRecords.length} propert${tabRecords.length===1?'y':'ies'}` : `${filtered.length} of ${tabRecords.length}`)
     : '';
 
-  if(records.length===0){
-    list.innerHTML = `<div class="empty">
-      <div class="big">No records yet</div>
-      <p>Tap the “＋” button below<br>to log your first house viewing.</p>
+  if(tabRecords.length===0){
+    list.innerHTML = viewTab==='wishlist'
+      ? `<div class="empty">
+      <div class="big">Nothing on your list yet</div>
+      <p>Tap “＋” or “Paste listing” to save places<br>you want to go and see.</p>
+    </div>`
+      : `<div class="empty">
+      <div class="big">No viewed properties yet</div>
+      <p>Tap the “＋” button below<br>to log a house you've seen,<br>or mark one from “Want to see” as viewed.</p>
     </div>`;
     updateCompareFab();
     return;
@@ -938,9 +1026,9 @@ function render(){
         <div class="row-meta">${r.buildingName ? escapeHtml(r.address) + ' · ' : ''}${priceRangeText(r)}${pricePerSqmText(r) ? ' ('+pricePerSqmText(r)+')' : ''} · ${r.area?r.area+' sqm':'Area not set'} · ${roomSummary(r)}</div>
       </div>
       <div class="row-side">
-        <div class="stars">${starString(r.rating)}</div>
-        ${decisionScoreText(r) ? `<div class="score-badge">${decisionScoreText(r)}</div>` : ''}
-        <div class="row-date">${fmtDate(r.date)}</div>
+        ${getStatus(r)==='viewed' ? `<div class="stars">${starString(r.rating)}</div>
+        ${decisionScoreText(r) ? `<div class="score-badge">${decisionScoreText(r)}</div>` : ''}` : ''}
+        <div class="row-date">${r.date ? (getStatus(r)==='wishlist' ? 'Planned ' : '') + fmtDate(r.date) : ''}</div>
       </div>
     </div>
   `).join('');
@@ -1008,9 +1096,11 @@ function openDetail(id){
 
 function renderDetail(r){
   const sheet = document.getElementById('sheet');
+  const isViewed = getStatus(r) === 'viewed';
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
     <h2>${escapeHtml(r.buildingName || r.address || 'Unnamed property')}</h2>
+    <div class="status-pill ${isViewed ? 'viewed' : ''}">${isViewed ? 'Viewed' : 'Want to see'}</div>
     ${r.buildingName ? `<div class="detail-block"><div class="detail-label">Full address</div><div class="detail-value">${escapeHtml(r.address)}</div></div>` : ''}
     ${r.listingUrl ? `<div class="detail-block"><div class="detail-label">Listing</div><div class="detail-value"><a href="${escapeHtml(r.listingUrl)}" target="_blank" rel="noopener" style="color:var(--accent);">View original listing ↗</a></div></div>` : ''}
     <div class="row3">
@@ -1024,8 +1114,8 @@ function renderDetail(r){
       </div>
     </div>
     <div class="detail-block">
-      <div class="detail-label">Viewing date</div>
-      <div class="detail-value">${fmtDate(r.date)}</div>
+      <div class="detail-label">${isViewed ? 'Viewing date' : 'Planned viewing date'}</div>
+      <div class="detail-value">${r.date ? fmtDate(r.date) : '—'}</div>
     </div>
     <div class="row3">
       <div class="detail-block">
@@ -1075,7 +1165,7 @@ function renderDetail(r){
         <div class="detail-value">${r.waterRate ? '$'+r.waterRate+'/qtr' : '—'}</div>
       </div>
     </div>
-    <div class="detail-block">
+${isViewed ? `    <div class="detail-block">
       <div class="detail-label">Rating</div>
       <div class="stars" style="font-size:20px">${starString(r.rating)}</div>
     </div>
@@ -1083,7 +1173,7 @@ function renderDetail(r){
       <div class="detail-label">Decision score (weighted)</div>
       <div class="detail-value">${decisionScoreText(r) || 'Not scored yet'}</div>
     </div>
-    <div class="detail-block">
+` : ''}    <div class="detail-block">
       <div class="detail-label">Commute to ${escapeHtml(settings.commuteLabel||'destination')}</div>
       <div class="detail-value">${r.commuteMinutes ? r.commuteMinutes + ' min' : '—'}</div>
     </div>
@@ -1091,16 +1181,16 @@ function renderDetail(r){
       <div class="detail-label">Distance to station</div>
       <div class="detail-value">${r.stationDistance ? r.stationDistance + ' km' : '—'}</div>
     </div>
-    <div class="detail-block">
+${isViewed ? `    <div class="detail-block">
       <div class="detail-label">Viewing checklist</div>
       <div class="detail-value">${checklistSummary(r) ? checklistSummary(r)+' checked' : 'No checklist items configured'}</div>
       ${(settings.checklistItems||[]).map(it=>`<div style="font-size:13px;color:${r.checklist&&r.checklist[it.id]?'var(--good)':'var(--ink-soft)'};padding:2px 0;">${r.checklist&&r.checklist[it.id]?'✓':'○'} ${escapeHtml(it.label)}</div>`).join('')}
     </div>
-    <div class="detail-block">
+` : ''}    <div class="detail-block">
       <div class="detail-label">Price history</div>
       ${(r.priceHistory&&r.priceHistory.length) ? r.priceHistory.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(h=>`<div class="price-history-item">${fmtDate(h.date)} — ${h.priceMin&&h.priceMax?(h.priceMin===h.priceMax?h.priceMin+' K':h.priceMin+'–'+h.priceMax+' K'):'—'}</div>`).join('') : '<div class="detail-value">No price changes logged yet</div>'}
     </div>
-    <div class="detail-block">
+${isViewed ? `    <div class="detail-block">
       <div class="detail-label">Building quality issues</div>
       <div class="detail-value ${r.qualityIssues==='yes' ? 'tag-concern' : ''}">${r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No known issues' : 'Not noted')}${r.qualityNotes ? ' — ' + escapeHtml(r.qualityNotes) : ''}</div>
     </div>
@@ -1116,10 +1206,20 @@ function renderDetail(r){
       <div class="detail-label">Overall review</div>
       <div class="detail-value">${escapeHtml(r.viewingReview)||'—'}</div>
     </div>
-    <div class="detail-block">
+` : ''}    <div class="detail-block">
       <div class="detail-label">Notes</div>
       <div class="detail-value">${escapeHtml(r.notes)||'—'}</div>
     </div>
+    <div class="detail-block">
+      <div class="detail-label">Noise</div>
+      <div class="detail-value ${(r.noiseLevel==='noisy'||r.noiseLevel==='very noisy') ? 'tag-concern' : ''}">${r.noiseLevel ? escapeHtml(r.noiseLevel.charAt(0).toUpperCase()+r.noiseLevel.slice(1)) : 'Not noted'}${r.noiseNotes ? ' — ' + escapeHtml(r.noiseNotes) : ''}</div>
+    </div>
+    <div class="detail-block">
+      <div class="detail-label">Map location</div>
+      <div class="detail-value">${hasCoords(r) ? (r.geoSource==='manual' ? 'Set manually' : r.geoSource==='suburb' ? 'Approximate (suburb centre)' : 'Found from address') : 'Not located yet'}</div>
+    </div>
+    <button class="btn btn-secondary btn-wide" id="setLocBtn" style="margin-bottom:10px;">📍 ${hasCoords(r) ? 'Move pin on map' : 'Set location on map'}</button>
+    ${isViewed ? '' : '<button class="btn btn-primary btn-wide" id="markViewedBtn">✓ Mark as viewed</button>'}
     <div class="btn-row">
       <button class="btn btn-secondary" id="editBtn">Edit</button>
       <button class="btn btn-danger" id="delBtn">Delete</button>
@@ -1128,6 +1228,20 @@ function renderDetail(r){
   `;
   sheet.querySelector('#closeBtn').addEventListener('click', closeOverlay);
   sheet.querySelector('#editBtn').addEventListener('click', ()=> openForm(r));
+  sheet.querySelector('#setLocBtn').addEventListener('click', ()=>{
+    closeOverlay();
+    placingId = r.id;
+    viewMode = 'map'; saveViewMode();
+    render();
+    if(mapObj && hasCoords(r)) mapObj.setView([r.lat, r.lng], Math.max(mapObj.getZoom(), 15));
+  });
+  const markBtn = sheet.querySelector('#markViewedBtn');
+  if(markBtn) markBtn.addEventListener('click', ()=>{
+    // open the edit form pre-set to "Viewed" with today's date, so the review
+    // fields (rating, checklist, pros/cons…) can be filled in straight away.
+    // Nothing changes until Save is pressed.
+    openForm(Object.assign({}, r, {status:'viewed', date:new Date().toISOString().slice(0,10)}));
+  });
   sheet.querySelector('#delBtn').addEventListener('click', async ()=>{
     if(confirm('Delete this viewing record?')){
       records = records.filter(x=>x.id!==r.id);
@@ -1139,7 +1253,7 @@ function renderDetail(r){
 }
 
 function openForm(existing){
-  const r = existing || {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
+  const r = existing || {id:uid(), status:viewTab, address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', noiseLevel:'', noiseNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
   if(!r.scores) r.scores = {};
   if(!r.checklist) r.checklist = {};
   if(!r.priceHistory) r.priceHistory = [];
@@ -1147,7 +1261,11 @@ function openForm(existing){
   const sheet = document.getElementById('sheet');
   sheet.innerHTML = `
     <div class="sheet-handle"></div>
-    <h2>${existing ? 'Edit record' : 'New viewing record'}</h2>
+    <h2>${existing ? 'Edit record' : 'New record'}</h2>
+    <div class="tabbar" style="margin:0 0 16px;">
+      <button type="button" class="tab ${getStatus(r)==='wishlist'?'active':''}" data-status="wishlist">Want to see</button>
+      <button type="button" class="tab ${getStatus(r)==='viewed'?'active':''}" data-status="viewed">Viewed</button>
+    </div>
     <div class="field">
       <label>Address / building name</label>
       <input type="text" id="f_address" value="${escapeHtml(r.address)}" placeholder="e.g. 502, Building 3, Osmanthus Court">
@@ -1177,7 +1295,7 @@ function openForm(existing){
       <input type="url" id="f_listingUrl" value="${escapeHtml(r.listingUrl||'')}" placeholder="https://www.realestate.com.au/...">
     </div>
     <div class="field">
-      <label>Viewing date</label>
+      <label id="f_dateLabel">Viewing date</label>
       <input type="date" id="f_date" value="${r.date||''}">
     </div>
     <div class="row2">
@@ -1229,7 +1347,7 @@ function openForm(existing){
         <input type="number" id="f_waterRate" value="${r.waterRate||''}" placeholder="180">
       </div>
     </div>
-    <div class="field">
+    <div class="field viewed-only">
       <label>Rating</label>
       <div class="star-picker" id="starPicker">
         ${[1,2,3,4,5].map(n=>`<span data-n="${n}" class="${n<=rating?'on':''}">★</span>`).join('')}
@@ -1245,6 +1363,21 @@ function openForm(existing){
         <input type="number" min="0" step="0.1" id="f_stationDistance" value="${r.stationDistance||''}" placeholder="0.8">
       </div>
     </div>
+    <div class="field">
+      <label>Noise level</label>
+      <select id="f_noiseLevel" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
+        <option value="" ${!r.noiseLevel?'selected':''}>Not noted</option>
+        <option value="quiet" ${r.noiseLevel==='quiet'?'selected':''}>Quiet</option>
+        <option value="moderate" ${r.noiseLevel==='moderate'?'selected':''}>Moderate</option>
+        <option value="noisy" ${r.noiseLevel==='noisy'?'selected':''}>Noisy</option>
+        <option value="very noisy" ${r.noiseLevel==='very noisy'?'selected':''}>Very noisy</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Noise notes</label>
+      <textarea id="f_noiseNotes" placeholder="e.g. main road facing, flight path, train line, neighbours…">${escapeHtml(r.noiseNotes||'')}</textarea>
+    </div>
+    <div class="viewed-only">
     <div class="field">
       <label>Building quality issues</label>
       <select id="f_qualityIssues" style="width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit;font-size:15px;color:var(--ink);">
@@ -1286,6 +1419,7 @@ function openForm(existing){
       <label>Overall review (after viewing)</label>
       <textarea id="f_viewingReview" placeholder="Your overall verdict after visiting…">${escapeHtml(r.viewingReview)}</textarea>
     </div>
+    </div>
     <div class="field">
       <label>Other notes</label>
       <textarea id="f_notes" placeholder="Agent contact, negotiation room, etc.">${escapeHtml(r.notes)}</textarea>
@@ -1304,6 +1438,15 @@ function openForm(existing){
       sheet.querySelectorAll('#starPicker span').forEach(x=> x.classList.toggle('on', parseInt(x.dataset.n)<=rating));
     });
   });
+  let formStatus = getStatus(r);
+  function applyFormStatus(){
+    const viewed = formStatus === 'viewed';
+    sheet.querySelectorAll('.viewed-only').forEach(el=> el.style.display = viewed ? '' : 'none');
+    sheet.querySelectorAll('.tab[data-status]').forEach(t=> t.classList.toggle('active', t.dataset.status === formStatus));
+    sheet.querySelector('#f_dateLabel').textContent = viewed ? 'Viewing date' : 'Planned viewing date (optional)';
+  }
+  sheet.querySelectorAll('.tab[data-status]').forEach(t=> t.addEventListener('click', ()=>{ formStatus = t.dataset.status; applyFormStatus(); }));
+  applyFormStatus();
   sheet.querySelector('#f_address').addEventListener('input', ()=>{
     const bField = sheet.querySelector('#f_buildingName');
     if(!bField.value.trim()){
@@ -1359,6 +1502,8 @@ function openForm(existing){
       stationDistance: sheet.querySelector('#f_stationDistance').value,
       qualityIssues: sheet.querySelector('#f_qualityIssues').value,
       qualityNotes: sheet.querySelector('#f_qualityNotes').value.trim(),
+      noiseLevel: sheet.querySelector('#f_noiseLevel').value,
+      noiseNotes: sheet.querySelector('#f_noiseNotes').value.trim(),
       rating: rating,
       scores,
       checklist,
@@ -1367,14 +1512,22 @@ function openForm(existing){
       cons: sheet.querySelector('#f_cons').value.trim(),
       viewingReview: sheet.querySelector('#f_viewingReview').value.trim(),
       notes: sheet.querySelector('#f_notes').value.trim(),
-      favorite: sheet.querySelector('#f_fav').checked
+      favorite: sheet.querySelector('#f_fav').checked,
+      status: formStatus,
+      lat: r.lat, lng: r.lng, geoSource: r.geoSource, geoTried: r.geoTried
     };
+    // a changed address invalidates an auto-found location (manual pins are kept)
+    if(updated.address !== (r.address||'') && updated.geoSource !== 'manual'){
+      delete updated.lat; delete updated.lng; delete updated.geoSource; delete updated.geoTried;
+    }
     if(!updated.address){
       alert('Please enter at least the property address');
       return;
     }
     const idx = records.findIndex(x=>x.id===updated.id);
     if(idx>=0) records[idx]=updated; else records.push(updated);
+    viewTab = updated.status; // jump to the tab the record now lives in
+    compareSelected.clear();
     await persist();
     render();
     closeOverlay();
@@ -1409,6 +1562,7 @@ document.getElementById('compareToggle').addEventListener('click', ()=>{
   document.getElementById('compareToggle').classList.toggle('active', compareMode);
   document.getElementById('compareToggle').textContent = compareMode ? '☑ Compare' : '☐ Compare';
   if(!compareMode) compareSelected.clear();
+  if(compareMode && viewMode==='map'){ viewMode='list'; }
   render();
 });
 
@@ -1437,7 +1591,7 @@ function openPasteListing(){
     const text = sheet.querySelector('#pasteText').value;
     if(!text.trim()){ alert('Paste some listing text first.'); return; }
     const draft = parseListingText(text);
-    const base = {id:uid(), address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
+    const base = {id:uid(), status:'wishlist', address:'', buildingName:'', suburb:'', yearBuilt:'', date:new Date().toISOString().slice(0,10), priceMin:'', priceMax:'', area:'', bedrooms:'', bathrooms:'', studyRooms:'', strataFee:'', rentalEstimate:'', councilRate:'', waterRate:'', qualityIssues:'', qualityNotes:'', noiseLevel:'', noiseNotes:'', rating:0, pros:'', cons:'', viewingReview:'', notes:'', favorite:false, scores:{}, checklist:{}, commuteMinutes:'', stationDistance:'', listingUrl:'', priceHistory:[]};
     openForm(Object.assign(base, draft));
   });
   openOverlay();
@@ -1536,6 +1690,7 @@ function openCompare(){
     {label:'Water', fn: r=> r.waterRate ? '$'+r.waterRate+'/qtr' : '—'},
     {label:'Distance to station', fn: r=> r.stationDistance ? r.stationDistance+' km' : '—'},
     {label:'Rating', fn: r=> starString(r.rating)},
+    {label:'Noise', fn: r=> r.noiseLevel ? (r.noiseLevel.charAt(0).toUpperCase()+r.noiseLevel.slice(1)) + (r.noiseNotes ? ' — ' + escapeHtml(r.noiseNotes) : '') : '—'},
     {label:'Quality issues', fn: r=> r.qualityIssues==='yes' ? 'Yes' : (r.qualityIssues==='no' ? 'No' : 'Not noted')},
     {label:'Pros', fn: r=> escapeHtml(r.pros)||'—'},
     {label:'Cons', fn: r=> escapeHtml(r.cons)||'—'},
@@ -1637,8 +1792,9 @@ document.getElementById('settingsBtn').addEventListener('click', openSettings);
 // ---------- Export ----------
 
 function buildExportRows(){
-  return getFilteredSorted().map(r=>({
+  return getFilteredSorted(true).map(r=>({
     'Address': r.address,
+    'Status': getStatus(r)==='wishlist' ? 'Want to see' : 'Viewed',
     'Building': r.buildingName,
     'Listing URL': r.listingUrl,
     'Suburb': r.suburb,
@@ -1657,6 +1813,8 @@ function buildExportRows(){
     'Water ($/qtr)': r.waterRate,
     'Commute (min)': r.commuteMinutes,
     'Distance to Station (km)': r.stationDistance,
+    'Noise Level': r.noiseLevel||'',
+    'Noise Notes': r.noiseNotes||'',
     'Quality Issues': r.qualityIssues==='yes'?'Yes':(r.qualityIssues==='no'?'No':''),
     'Quality Notes': r.qualityNotes,
     'Rating': r.rating,
@@ -1700,6 +1858,7 @@ document.getElementById('exportPdfBtn').addEventListener('click', exportToPdf);
 // ---------- Excel / CSV import ----------
 
 const FIELD_ALIASES = {
+  status: ['status','viewingstatus','stage'],
   address: ['address','property','propertyaddress','name','building','apartment','unit'],
   buildingName: ['buildingname','building','community','complex','communityname','propertyname','estate'],
   listingUrl: ['listingurl','url','link','listinglink'],
@@ -1720,6 +1879,8 @@ const FIELD_ALIASES = {
   commuteMinutes: ['commute','commutetime','commuteminutes','commutemins'],
   stationDistance: ['distancetostationkm','distancetostation','stationdistance','distancetostationskm'],
   qualityIssues: ['qualityissues','qualityissue','issues'],
+  noiseLevel: ['noiselevel','noise'],
+  noiseNotes: ['noisenotes','noisedetails'],
   qualityNotes: ['qualitynotes','issuedetails','defects','qualitydetails'],
   rating: ['rating','stars','score'],
   pros: ['pros','pro','positives'],
@@ -1784,8 +1945,14 @@ function rowToRecord(row){
   if(['yes','y','true','1'].includes(qiRaw)) qualityIssues = 'yes';
   else if(['no','n','false','0'].includes(qiRaw)) qualityIssues = 'no';
 
+  const statusRaw = String(pick('status') || '').toLowerCase().trim();
+  let status = viewTab; // no Status column → file goes into the tab you're on
+  if(/want|wish|to\s*see|not\s*(yet\s*)?viewed|unviewed|planned|todo|to\s*do|upcoming/.test(statusRaw)) status = 'wishlist';
+  else if(/viewed|seen|done|visited/.test(statusRaw)) status = 'viewed';
+
   return {
     id: uid(),
+    status,
     address,
     buildingName,
     listingUrl: pick('listingUrl') !== '' ? String(pick('listingUrl')) : '',
@@ -1805,6 +1972,8 @@ function rowToRecord(row){
     commuteMinutes: pick('commuteMinutes') !== '' ? String(pick('commuteMinutes')) : '',
     stationDistance: pick('stationDistance') !== '' ? String(pick('stationDistance')) : '',
     qualityIssues,
+    noiseLevel: (()=>{ const n=String(pick('noiseLevel')||'').toLowerCase().trim(); return ['quiet','moderate','noisy','very noisy'].includes(n) ? n : ''; })(),
+    noiseNotes: pick('noiseNotes') !== '' ? String(pick('noiseNotes')) : '',
     qualityNotes: pick('qualityNotes') !== '' ? String(pick('qualityNotes')) : '',
     rating,
     pros: pick('pros') !== '' ? String(pick('pros')) : '',
@@ -1869,8 +2038,8 @@ async function handleImportFile(e){
 }
 
 function downloadTemplate(){
-  const headers = ['Address','Building','Listing URL','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Bathrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Distance to Station (km)','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
-  const example = ['303/71 Ridge Street','71 Ridge Street','https://www.realestate.com.au/property-...','North Sydney','1998','2026-03-15','260','300','88','2','1','1','350/month','650','450','180','25','0.8','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
+  const headers = ['Address','Status','Building','Listing URL','Suburb','Year Built','Date','Price Min','Price Max','Area','Bedrooms','Bathrooms','Study Rooms','Strata Fee','Rental Estimate ($/wk)','Council ($/qtr)','Water ($/qtr)','Commute (min)','Distance to Station (km)','Noise Level','Noise Notes','Quality Issues','Quality Notes','Rating','Pros','Cons','Overall Review','Notes','Favorite'];
+  const example = ['303/71 Ridge Street','Viewed','71 Ridge Street','https://www.realestate.com.au/property-...','North Sydney','1998','2026-03-15','260','300','88','2','1','1','350/month','650','450','180','25','0.8','Moderate','Main road side, some traffic hum','No','','4','Good light, near subway','Street noise','Would consider if price drops a bit','Agent: Jane 555-1234','No'];
   const esc = v => `"${String(v).replace(/"/g,'""')}"`;
   const csv = headers.map(esc).join(',') + '\n' + example.map(esc).join(',');
   // Prepend a UTF-8 BOM so Excel (especially non-English locales) detects the
@@ -1890,6 +2059,191 @@ function downloadTemplate(){
 document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('importInput').click());
 document.getElementById('importInput').addEventListener('change', handleImportFile);
 document.getElementById('templateBtn').addEventListener('click', downloadTemplate);
+
+document.querySelectorAll('.tabbar .tab[data-tab]').forEach(tab=>{
+  tab.addEventListener('click', ()=>{
+    viewTab = tab.dataset.tab;
+    compareSelected.clear();
+    render();
+  });
+});
+
+// ---------- Map view ----------
+let viewMode = 'map';
+try{ if(localStorage.getItem('houseLogView')==='list') viewMode='list'; }catch(e){}
+function saveViewMode(){ try{ localStorage.setItem('houseLogView', viewMode); }catch(e){} }
+let mapObj = null, markerLayer = null, placingId = null, lastFitKey = '';
+let geoQueue = [], geoRunning = false, geoOfflineUntil = 0;
+
+function hasCoords(r){ return r && isFinite(parseFloat(r.lat)) && isFinite(parseFloat(r.lng)) && r.lat !== '' && r.lng !== ''; }
+function needsGeo(r){ return r && !hasCoords(r) && (r.address||'').trim() && r.geoTried !== r.address; }
+const sleep = ms => new Promise(res=> setTimeout(res, ms));
+
+function geoCandidates(r){
+  const a = (r.address||'').trim();
+  const withCountry = x => /australia/i.test(x) ? x : x + ', Australia';
+  // "303/71 Ridge Street" -> "71 Ridge Street" (unit numbers confuse geocoders)
+  const stripped = a.replace(/^\s*(?:unit|apt|apartment|suite|u|level|lvl)?\s*[\w-]+\s*\/\s*/i, '');
+  const out = [];
+  out.push({q: withCountry(stripped), src:'address'});
+  if(stripped !== a) out.push({q: withCountry(a), src:'address'});
+  const st = (a.match(/\b(NSW|VIC|QLD|SA|WA|TAS|ACT|NT)\b/i)||[])[1] || '';
+  if(r.buildingName && r.suburb) out.push({q: withCountry(`${r.buildingName}, ${r.suburb} ${st}`.trim()), src:'address'});
+  if(r.suburb) out.push({q: withCountry(`${r.suburb} ${st}`.trim()), src:'suburb'});
+  return out;
+}
+
+async function geocodeRecord(r){
+  for(const c of geoCandidates(r)){
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=au&q=' + encodeURIComponent(c.q);
+    const res = await fetch(url, {headers:{'Accept':'application/json'}});
+    if(!res.ok) throw new Error('geocode http ' + res.status);
+    const data = await res.json();
+    if(Array.isArray(data) && data.length){
+      const lat = parseFloat(data[0].lat), lng = parseFloat(data[0].lon);
+      if(isFinite(lat) && isFinite(lng)) return {lat, lng, src:c.src};
+    }
+    await sleep(1100); // Nominatim allows ~1 request per second
+  }
+  return null;
+}
+
+function queueGeocoding(){
+  if(Date.now() < geoOfflineUntil) return;
+  records.forEach(r=>{ if(needsGeo(r) && !geoQueue.includes(r.id)) geoQueue.push(r.id); });
+  runGeoQueue();
+}
+
+async function runGeoQueue(){
+  if(geoRunning) return;
+  geoRunning = true;
+  let changed = false;
+  try{
+    while(geoQueue.length){
+      const id = geoQueue.shift();
+      const r = records.find(x=>x.id===id);
+      if(!r || !needsGeo(r)) continue;
+      const asked = r.address;
+      const found = await geocodeRecord(r);
+      if(r.address !== asked) continue; // edited meanwhile
+      r.geoTried = asked;
+      if(found){ r.lat = found.lat; r.lng = found.lng; r.geoSource = found.src; }
+      changed = true;
+      if(viewMode==='map') renderMap(true);
+      await sleep(1100);
+    }
+  }catch(e){
+    console.warn('Geocoding paused:', e);
+    geoQueue = [];
+    geoOfflineUntil = Date.now() + 60000;
+  }
+  geoRunning = false;
+  if(changed){ await persist(); if(viewMode==='map') renderMap(true); }
+}
+
+function applyViewMode(){
+  const isMap = viewMode==='map';
+  document.getElementById('mapWrap').style.display = isMap ? 'block' : 'none';
+  document.getElementById('list').style.display = isMap ? 'none' : 'block';
+  document.querySelector('.toolbar').style.display = isMap ? 'none' : '';
+  document.getElementById('viewMap').classList.toggle('active', isMap);
+  document.getElementById('viewList').classList.toggle('active', !isMap);
+  document.getElementById('addBtn').style.display = '';
+}
+
+function ensureMap(){
+  if(mapObj) return true;
+  const el = document.getElementById('map');
+  if(typeof L === 'undefined'){
+    el.innerHTML = '<div class="map-msg">The map could not load (it needs an internet connection).<br>Switch to “List” to keep using the app.</div>';
+    return false;
+  }
+  el.innerHTML = '';
+  mapObj = L.map(el, {zoomControl:true}).setView([-33.8688, 151.2093], 11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(mapObj);
+  markerLayer = L.layerGroup().addTo(mapObj);
+  mapObj.on('click', async (e)=>{
+    if(!placingId) return;
+    const r = records.find(x=>x.id===placingId);
+    const id = placingId;
+    placingId = null;
+    if(r){
+      r.lat = e.latlng.lat; r.lng = e.latlng.lng; r.geoSource = 'manual'; r.geoTried = r.address;
+      await persist();
+    }
+    render();
+    if(r) openDetail(id);
+  });
+  return true;
+}
+
+function renderMap(keepView){
+  if(!ensureMap()) return;
+  setTimeout(()=> mapObj.invalidateSize(), 0);
+  markerLayer.clearLayers();
+  const shown = getFilteredSorted();
+  const placed = [], missing = [];
+  const seen = {};
+  shown.forEach(r=>{
+    if(!hasCoords(r)){ missing.push(r); return; }
+    let lat = parseFloat(r.lat), lng = parseFloat(r.lng);
+    const key = lat.toFixed(5)+','+lng.toFixed(5);
+    const n = seen[key] = (seen[key]||0) + 1;
+    if(n>1){ lng += 0.00007 * (n-1); lat += 0.00004 * (n-1); } // spread properties in the same building
+    const icon = L.divIcon({className:'house-dot' + (r.geoSource==='suburb' ? ' approx' : ''), iconSize:[26,26], iconAnchor:[13,13]});
+    const m = L.marker([lat,lng], {icon, title: r.buildingName || r.address || ''});
+    m.on('click', ()=>{
+      if(placingId) return;
+      openDetail(r.id);
+    });
+    m.addTo(markerLayer);
+    placed.push([lat,lng]);
+  });
+  const fitKey = placed.map(p=>p.join(',')).join('|');
+  if(!keepView && fitKey !== lastFitKey && placed.length){
+    lastFitKey = fitKey;
+    if(placed.length===1) mapObj.setView(placed[0], 15);
+    else mapObj.fitBounds(placed, {padding:[40,40], maxZoom:16});
+  }
+  // note under the filters
+  const note = document.getElementById('mapNote');
+  const pending = missing.filter(r=> needsGeo(r)).length;
+  if(!shown.length){
+    note.style.display='block';
+    note.textContent = records.length ? 'Nothing matches these filters.' : 'No properties yet — tap ＋ to add one and it will appear here.';
+  }else if(missing.length){
+    note.style.display='block';
+    note.innerHTML = (pending ? `Finding ${pending} address${pending===1?'':'es'}… ` : '') +
+      (missing.length-pending ? `${missing.length-pending} couldn’t be located — tap one to set its pin:` : '') +
+      '<div>' + missing.filter(r=>!needsGeo(r)).map(r=>`<button class="chip" data-miss="${r.id}">${escapeHtml(r.buildingName||r.address)}</button>`).join('') + '</div>';
+    note.querySelectorAll('[data-miss]').forEach(b=> b.addEventListener('click', ()=> openDetail(b.dataset.miss)));
+  }else{
+    note.style.display='none'; note.innerHTML='';
+  }
+  // placing banner
+  const bar = document.getElementById('placingBar');
+  const pr = placingId && records.find(x=>x.id===placingId);
+  if(pr){
+    bar.innerHTML = `<div class="placing-banner"><span>Tap the map to place <b>${escapeHtml(pr.buildingName||pr.address)}</b></span><button id="cancelPlacing">Cancel</button></div>`;
+    bar.querySelector('#cancelPlacing').addEventListener('click', ()=>{ const id=placingId; placingId=null; render(); openDetail(id); });
+    mapObj.getContainer().style.cursor = 'crosshair';
+  }else{
+    bar.innerHTML = '';
+    mapObj.getContainer().style.cursor = '';
+  }
+  queueGeocoding();
+}
+
+document.querySelectorAll('.viewbar .tab').forEach(b=> b.addEventListener('click', ()=>{
+  viewMode = b.dataset.view;
+  if(viewMode==='map' && compareMode){ compareMode=false; compareSelected.clear(); const t=document.getElementById('compareToggle'); t.classList.remove('active'); t.textContent='☐ Compare'; }
+  placingId = null;
+  saveViewMode();
+  render();
+}));
 
 initAuthAndLoad();
 </script>

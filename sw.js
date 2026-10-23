@@ -1,4 +1,4 @@
-const CACHE = 'house-log-v2';
+const CACHE = 'house-log-v3';
 const ASSETS = [
   './index.html',
   './manifest.webmanifest',
@@ -13,6 +13,7 @@ self.addEventListener('activate', event => {
 });
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  if (new URL(event.request.url).origin !== self.location.origin) return; // map tiles, geocoding, CDNs: let the browser handle them
   event.respondWith(
     fetch(event.request).then(response => {
       const copy = response.clone();
