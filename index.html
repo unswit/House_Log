@@ -552,6 +552,7 @@ function setSyncStatus(text){
 
 const STORAGE_KEY = "viewings-data";
 const SETTINGS_KEY = "settings-data";
+const META_KEY = "viewings-meta"; // { savedAt } — when this device last saved, so a stale cloud copy can't resurrect a deleted record on reload
 let records = [];
 let searchQuery = '';
 let filterMode = 'all'; // all | favorite | issues
@@ -638,19 +639,33 @@ async function loadSettings(){
 }
 
 async function saveAll(){
+  const now = Date.now();
   await localSet(STORAGE_KEY, {records});
   await localSet(SETTINGS_KEY, settings);
+  await localSet(META_KEY, {savedAt: now});
   if(cloudEnabled && currentUserId){
     setSyncStatus('Syncing…');
-    try{
-      const { error } = await sb.from('app_data').upsert({ user_id: currentUserId, records, settings, updated_at: new Date().toISOString() });
-      setSyncStatus(error ? '⚠ Sync failed — saved on this device only' : '☁ Synced');
-      if(error) console.error(error);
-    }catch(e){
-      console.error(e);
-      setSyncStatus('⚠ Sync failed — saved on this device only');
+    // One retry: cloud sync has failed intermittently before, and a failed
+    // save used to be silent — the next reload then pulled the old cloud
+    // copy back over the local one, resurrecting deleted records.
+    for(let attempt = 0; attempt < 2; attempt++){
+      try{
+        const { error } = await sb.from('app_data').upsert({ user_id: currentUserId, records, settings, updated_at: new Date(now).toISOString() });
+        if(!error){
+          setSyncStatus('☁ Synced');
+          return true;
+        }
+        console.error(error);
+        if(attempt === 0) await new Promise(r=>setTimeout(r, 800));
+      }catch(e){
+        console.error(e);
+        if(attempt === 0) await new Promise(r=>setTimeout(r, 800));
+      }
     }
+    setSyncStatus('⚠ Sync failed — saved on this device only');
+    return false;
   }
+  return true;
 }
 
 async function persistSettings(){ await saveAll(); }
@@ -659,9 +674,18 @@ async function pullFromCloud(){
   if(!(cloudEnabled && currentUserId)) return false;
   setSyncStatus('Syncing…');
   try{
-    const { data, error } = await sb.from('app_data').select('records, settings').eq('user_id', currentUserId).maybeSingle();
+    const { data, error } = await sb.from('app_data').select('records, settings, updated_at').eq('user_id', currentUserId).maybeSingle();
     if(error) throw error;
     if(data){
+      // Don't let a stale cloud copy overwrite a newer local one — e.g. a
+      // record deleted on this device whose cloud save failed, which used
+      // to come back on the next reload.
+      const meta = await localGet(META_KEY);
+      const cloudAt = data.updated_at ? new Date(data.updated_at).getTime() : 0;
+      if(meta && meta.savedAt && cloudAt && cloudAt <= meta.savedAt){
+        setSyncStatus('☁ Synced');
+        return true;
+      }
       records = data.records || [];
       if(data.settings){
         settings = Object.assign({}, DEFAULT_SETTINGS, data.settings);
@@ -670,6 +694,7 @@ async function pullFromCloud(){
       }
       await localSet(STORAGE_KEY, {records});
       await localSet(SETTINGS_KEY, settings);
+      if(cloudAt) await localSet(META_KEY, {savedAt: cloudAt});
       setSyncStatus('☁ Synced');
       return true;
     }else{
@@ -696,7 +721,7 @@ async function load(){
   }
 }
 
-async function persist(){ await saveAll(); }
+async function persist(){ return await saveAll(); }
 
 async function initAuthAndLoad(){
   if(!cloudEnabled){
@@ -1242,12 +1267,36 @@ ${isViewed ? `    <div class="detail-block">
     // Nothing changes until Save is pressed.
     openForm(Object.assign({}, r, {status:'viewed', date:new Date().toISOString().slice(0,10)}));
   });
-  sheet.querySelector('#delBtn').addEventListener('click', async ()=>{
-    if(confirm('Delete this viewing record?')){
-      records = records.filter(x=>x.id!==r.id);
-      await persist();
-      render();
-      closeOverlay();
+  // Two-tap delete inside the app — no native confirm() dialog, which can be
+  // blocked or auto-dismissed in a phone web app / in-app browser, leaving
+  // the record undeleted with no prompt shown at all.
+  const delBtn = sheet.querySelector('#delBtn');
+  let deleteArmed = false;
+  let deleteArmTimer = null;
+  delBtn.addEventListener('click', async ()=>{
+    if(!deleteArmed){
+      deleteArmed = true;
+      delBtn.textContent = 'Tap again to confirm delete';
+      delBtn.style.background = 'var(--concern)';
+      delBtn.style.color = '#fff';
+      deleteArmTimer = setTimeout(()=>{
+        deleteArmed = false;
+        delBtn.textContent = 'Delete';
+        delBtn.style.background = '';
+        delBtn.style.color = '';
+      }, 4000);
+      return;
+    }
+    clearTimeout(deleteArmTimer);
+    const before = records.length;
+    records = records.filter(x=>x.id!==r.id);
+    const synced = await persist();
+    render();
+    closeOverlay();
+    if(records.length === before){
+      alert('That record could not be deleted. Please try again.');
+    }else if(synced === false){
+      alert('Deleted on this device, but cloud sync failed — it may come back after a reload. Please check your connection and try deleting it again.');
     }
   });
 }
